@@ -59,6 +59,11 @@
   .day .s.ok{color:var(--good)}
   .day .s.no{color:var(--bad)}
   .day.future{opacity:.35}
+  .day{cursor:pointer;border-radius:8px}
+  .day.sel{outline:1px solid var(--good);background:rgba(143,191,122,.10)}
+  .day.miss .s{color:var(--bad);font-size:12px}
+  .ghost.mini{margin-top:0;margin-bottom:10px;padding:8px}
+  .stats{grid-template-columns:1fr 1fr}
   dialog{background:var(--card);color:var(--ink);border:1px solid var(--line);
     border-radius:14px;max-width:420px;padding:18px}
   dialog::backdrop{background:rgba(0,0,0,.6)}
@@ -79,21 +84,23 @@
     <label class="field"><span>£</span>
       <input id="amt" inputmode="decimal" placeholder="0.00" class="mono">
     </label>
-    <button id="log">Log</button>
+    <button id="logBtn">Log</button>
   </div>
   <div class="status" id="status">Starting…</div>
+  <button class="ghost mini" id="clearBtn" style="display:none">Clear this day</button>
 
   <div class="stats">
+    <div class="stat"><b>Streak</b><i class="mono" id="sStreak">—</i></div>
     <div class="stat"><b>Spent so far</b><i class="mono" id="sSpent">—</i></div>
     <div class="stat"><b>Budget left</b><i class="mono" id="sLeft">—</i></div>
     <div class="stat"><b>vs schedule</b><i class="mono" id="sDiff">—</i></div>
     <div class="stat"><b>Projected savings</b><i class="mono" id="sProj">—</i></div>
   </div>
 
-  <h2>Ledger</h2>
+  <h2>Ledger · <span style="text-transform:none;letter-spacing:0">tap a day to edit</span></h2>
   <div id="ledger"></div>
 
-  <button class="ghost" id="undo">Undo last entry</button>
+  <button class="ghost" id="todayBtn">Jump to next unlogged day</button>
   <button class="ghost" id="exp">Export backup (JSON)</button>
 </div>
 
@@ -105,18 +112,20 @@
 // Fill both to sync between phone and laptop.
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
-// ───────────────────────────────────────────────────────────
+// ────────────────────────────────
 
 const TOTAL = 442, TARGET = 300;
 const LONDON = {"2026-08-14":20,"2026-08-15":45,"2026-08-16":45};
 const DAYS = (()=>{const o=[],d=new Date("2026-08-12T12:00:00Z"),e=new Date("2026-09-11T12:00:00Z");
   while(d<=e){o.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);}return o;})();
-const money = n => "£" + n.toFixed(2);
+const money = n => "\u00a3" + n.toFixed(2);
 const lbl = s => new Date(s+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",timeZone:"UTC"});
 const todayISO = () => { const n=new Date(); return new Date(n.getTime()-n.getTimezoneOffset()*6e4).toISOString().slice(0,10); };
 
 const remote = !!(SUPABASE_URL && SUPABASE_KEY);
 let log = {};
+let target = null;          // day currently selected for entry
+let pinned = false;         // true once the user picks a day manually
 
 const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
   ...opts, headers:{apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY,
@@ -167,36 +176,74 @@ function engine(){
   return {rows, spent, skim, left: TOTAL-spent-skim, proj: TARGET+skim};
 }
 
-function targetDay(){ return DAYS.find(d=>log[d]===undefined) || DAYS[DAYS.length-1]; }
+// consecutive logged days ending at the most recent logged day
+function streak(){
+  const done = DAYS.filter(d=>log[d]!==undefined);
+  if(!done.length) return {n:0, broken:false};
+  const last = done[done.length-1];
+  let n=0, i=DAYS.indexOf(last);
+  while(i>=0 && log[DAYS[i]]!==undefined){ n++; i--; }
+  // broken if there is an unlogged day before today that sits before `last`
+  const t = todayISO();
+  const missed = DAYS.some(d => d < t && d < last && log[d]===undefined);
+  return {n, broken:missed};
+}
+
+function nextUnlogged(){ return DAYS.find(d=>log[d]===undefined) || DAYS[DAYS.length-1]; }
 
 function render(){
   const {rows,spent,left,proj} = engine();
-  const t = targetDay();
-  const row = rows.find(r=>r.day===t);
-  document.getElementById("heroLbl").textContent = "Allowance for " + lbl(t);
+  if(!pinned) target = nextUnlogged();
+  const row = rows.find(r=>r.day===target);
+  const editing = log[target]!==undefined;
+
+  document.getElementById("heroLbl").textContent =
+    (editing ? "Editing " : "Allowance for ") + lbl(target);
   document.getElementById("heroNum").innerHTML = money(row.allow) +
-    (LONDON[t] ? '<span class="pill">London</span>' : "");
+    (LONDON[target] ? '<span class="pill">London</span>' : "");
+
   const done = rows.filter(r=>r.spend!==null);
   const sched = done.reduce((a,r)=>a+r.diff,0);
   document.getElementById("bar").style.width = Math.min(100, done.length/DAYS.length*100)+"%";
+
+  const st = streak();
+  const se = document.getElementById("sStreak");
+  se.textContent = st.n===0 ? "\u2014" : st.n + (st.n===1?" day":" days");
+  se.style.color = st.broken ? "var(--bad)" : (st.n>0 ? "var(--accent)" : "var(--dim)");
+
   document.getElementById("sSpent").textContent = money(spent);
   document.getElementById("sLeft").textContent = money(left);
   const sd = document.getElementById("sDiff");
-  sd.textContent = (sched>=0?"+":"−") + money(Math.abs(sched)).replace("£","£");
+  sd.textContent = (sched>=0?"+":"\u2212") + money(Math.abs(sched));
   sd.style.color = sched>=0 ? "var(--good)" : "var(--bad)";
   const sp = document.getElementById("sProj");
   sp.textContent = money(proj);
   sp.style.color = proj>=TARGET ? "var(--good)" : "var(--bad)";
 
-  const today = todayISO();
+  document.getElementById("logBtn").textContent = editing ? "Update" : "Log";
+  document.getElementById("clearBtn").style.display = editing ? "block" : "none";
+
+  const t = todayISO();
   document.getElementById("ledger").innerHTML = rows.map(r=>{
     const on = r.spend!==null;
-    const cls = ["day", on?"":"future", r.day===today?"today":""].join(" ");
+    const cls = ["day", on?"":"future", r.day===t?"today":"", r.day===target?"sel":""].join(" ");
     const sc = on ? (r.diff>=0?"ok":"no") : "na";
-    return `<div class="${cls}"><span class="d">${lbl(r.day)}</span>
+    const miss = !on && r.day < t ? " miss" : "";
+    return `<div class="${cls}${miss}" data-day="${r.day}"><span class="d">${lbl(r.day)}</span>
       <span class="a mono">${money(r.allow)}</span>
-      <span class="s mono ${sc}">${on?money(r.spend):"—"}</span></div>`;
+      <span class="s mono ${sc}">${on?money(r.spend):(r.day<t?"missed":"\u2014")}</span></div>`;
   }).join("");
+
+  [...document.querySelectorAll(".day")].forEach(el=>{
+    el.onclick = () => {
+      pinned = true;
+      target = el.dataset.day;
+      const cur = log[target];
+      document.getElementById("amt").value = cur!==undefined ? cur : "";
+      render();
+      document.getElementById("amt").focus();
+    };
+  });
 }
 
 function say(msg, err){
@@ -206,29 +253,40 @@ function say(msg, err){
 
 async function boot(){
   try{ await load(); render();
-    say(remote ? `Synced · ${Object.keys(log).length} days` : `On this device · ${Object.keys(log).length} days`);
+    const st = streak();
+    say(remote ? `Synced \u00b7 ${Object.keys(log).length} days` : `On this device \u00b7 ${Object.keys(log).length} days`);
   }catch(e){ say("Could not load: "+e.message, true); render(); }
 }
 
-document.getElementById("log").onclick = async () => {
+document.getElementById("logBtn").onclick = async () => {
   const el = document.getElementById("amt");
   const v = parseFloat(el.value.replace(",","."));
   if(isNaN(v) || v<0) return say("Enter a number", true);
-  const day = targetDay();
+  const day = target;
   const prev = {...log};
-  log[day] = v; render(); say("Saving…");
-  try{ await persist(day, v); el.value=""; say(remote?"Synced ✓":"Saved ✓"); }
+  log[day] = v; render(); say("Saving\u2026");
+  try{
+    await persist(day, v);
+    el.value=""; pinned=false; render();
+    say((remote?"Synced":"Saved")+" \u2713 " + lbl(day));
+  }
   catch(e){ log = prev; render(); say("Not saved: "+e.message, true); }
 };
 
-document.getElementById("undo").onclick = async () => {
-  const done = DAYS.filter(d=>log[d]!==undefined);
-  if(!done.length) return;
-  const day = done[done.length-1];
+document.getElementById("clearBtn").onclick = async () => {
+  const day = target;
+  if(log[day]===undefined) return;
   const prev = {...log};
-  delete log[day]; render(); say("Removing…");
-  try{ await remove(day); say("Removed "+lbl(day)); }
+  delete log[day]; render(); say("Removing\u2026");
+  try{ await remove(day); document.getElementById("amt").value=""; pinned=false; render(); say("Cleared "+lbl(day)); }
   catch(e){ log = prev; render(); say("Not removed: "+e.message, true); }
+};
+
+document.getElementById("todayBtn").onclick = () => {
+  pinned = false;
+  document.getElementById("amt").value = "";
+  render();
+  say("Back to next unlogged day");
 };
 
 document.getElementById("exp").onclick = () => {
@@ -242,8 +300,9 @@ document.getElementById("exp").onclick = () => {
 };
 
 document.getElementById("amt").addEventListener("keydown", e => {
-  if(e.key==="Enter") document.getElementById("log").click();
+  if(e.key==="Enter") document.getElementById("logBtn").click();
 });
 
 boot();
+
 </script>
