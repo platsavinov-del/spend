@@ -55,7 +55,7 @@
   .day{display:flex;align-items:center;gap:8px;padding:6px 4px;font-size:12px;
     cursor:pointer;position:relative;transition:background .15s}
   .day:hover{background:var(--paper-2)}
-  .day .d{width:52px;color:var(--ink-2)}
+  .day .d{width:62px;color:var(--ink-2)}
   .day .a{flex:1;text-align:right;color:var(--fade);font-variant-numeric:tabular-nums}
   .day .s{width:74px;text-align:right;font-variant-numeric:tabular-nums}
   .day.future{color:var(--fade)}
@@ -64,7 +64,7 @@
   .day.miss .s{color:var(--bad)}
   .day.ok .s{color:var(--good)}
   .day.over .s{color:var(--bad)}
-  .day.today::before{content:"\u25B8";position:absolute;left:-8px;color:var(--ink)}
+  .day.today .d::before{content:"▸ ";color:var(--ink)}
   .barcode{height:34px;margin:16px 0 6px;
     background:repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 4px,
       var(--ink) 4px 5px,transparent 5px 9px,var(--ink) 9px 12px,transparent 12px 14px)}
@@ -81,33 +81,33 @@
 
 <div class="slip">
   <div class="head print">SPEND CHALLENGE</div>
-  <div class="sub print">12 AUG \u2014 11 SEP \u00b7 GLASGOW</div>
+  <div class="sub print">12 AUG — 11 SEP · GLASGOW</div>
   <hr class="rule print">
 
   <div class="print" style="animation-delay:.05s">
     <div class="lbl" id="heroLbl">ALLOWANCE</div>
-    <div class="big" id="heroNum">\u2014</div>
+    <div class="big" id="heroNum">—</div>
   </div>
 
   <div class="row-in print" style="animation-delay:.1s">
     <input id="amt" inputmode="decimal" placeholder="0.00">
     <button id="logBtn">LOG</button>
   </div>
-  <div class="status" id="status">\u2026</div>
+  <div class="status" id="status">…</div>
   <button class="ghost" id="clearBtn" style="display:none">CLEAR THIS DAY</button>
 
   <hr class="rule">
   <div id="totals"></div>
 
   <hr class="rule">
-  <div class="lbl" style="margin-bottom:6px">DETAIL \u00b7 TAP A DAY TO EDIT</div>
+  <div class="lbl" style="margin-bottom:6px">DETAIL · TAP A DAY TO EDIT</div>
   <div id="ledger"></div>
 
   <hr class="rule">
   <button class="ghost" id="todayBtn">GO TO NEXT UNLOGGED DAY</button>
   <button class="ghost" id="exp">EXPORT BACKUP</button>
   <div class="barcode"></div>
-  <div class="foot">THANK YOU \u00b7 KEEP THIS RECEIPT</div>
+  <div class="foot">THANK YOU · KEEP THIS RECEIPT</div>
 </div>
 
 <dialog id="dlg"></dialog>
