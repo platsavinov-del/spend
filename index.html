@@ -77,6 +77,24 @@
     .print,.big.flick{animation:none}
     *{transition:none!important}
   }
+  .tot.total{font-size:14px;padding-top:8px}
+  .tot.total .k{color:var(--ink)}
+  .tot.total .v{font-weight:700}
+  .day .mk{color:var(--brass)}
+  .owed-toggle{width:100%;background:transparent;color:var(--ink-2);
+    border:1px dashed var(--rule);padding:7px;letter-spacing:.1em;font-size:10px;
+    margin-top:6px;text-align:center}
+  .owed-fields{display:none;gap:6px;margin-top:6px}
+  .owed-fields.on{display:flex}
+  .owed-fields .fld{flex:1;border:1px solid var(--rule);display:flex}
+  .owed-fields input{font-size:14px;padding:8px}
+  .owed-note{font-size:10px;color:var(--ink-2);margin-top:6px;letter-spacing:.04em}
+  .debt{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px;
+    border-bottom:1px dotted var(--rule)}
+  .debt .dd{width:56px;color:var(--ink-2)}
+  .debt .dw{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .debt .da{color:var(--brass);font-variant-numeric:tabular-nums}
+  .debt button{padding:3px 8px;font-size:9px;letter-spacing:.1em}
 </style>
 
 <div class="slip">
@@ -93,11 +111,25 @@
     <input id="amt" inputmode="decimal" placeholder="0.00">
     <button id="logBtn">LOG</button>
   </div>
+
+  <button class="owed-toggle" id="owedToggle">+ SOMEONE OWES ME</button>
+  <div class="owed-fields" id="owedFields">
+    <label class="fld"><input id="owedAmt" inputmode="decimal" placeholder="0.00"></label>
+    <label class="fld"><input id="owedWho" maxlength="14" placeholder="who"></label>
+  </div>
+  <div class="owed-note" id="owedNote" style="display:none"></div>
+
   <div class="status" id="status">…</div>
   <button class="ghost" id="clearBtn" style="display:none">CLEAR THIS DAY</button>
 
   <hr class="rule">
   <div id="totals"></div>
+
+  <div id="debtsWrap" style="display:none">
+    <hr class="rule">
+    <div class="lbl" style="margin-bottom:6px">OWED TO YOU</div>
+    <div id="debts"></div>
+  </div>
 
   <hr class="rule">
   <div class="lbl" style="margin-bottom:6px">DETAIL · TAP A DAY TO EDIT</div>
@@ -111,10 +143,12 @@
 </div>
 
 <dialog id="dlg"></dialog>
-
 <script>
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
+
+// ────────────────────────────────────────────
+
 
 const TOTAL = 442, TARGET = 300;
 const LONDON = {"2026-08-14":20,"2026-08-15":45,"2026-08-16":45};
@@ -127,20 +161,31 @@ const todayISO = () => { const n=new Date(); return new Date(n.getTime()-n.getTi
 const remote = !!(SUPABASE_URL && SUPABASE_KEY);
 let log = {}, target = null, pinned = false, firstPaint = true, shownNum = null;
 
+const amtOf  = d => log[d] ? log[d].a : undefined;
+const owedOf = d => (log[d] && log[d].o) ? log[d].o : 0;
+const whoOf  = d => (log[d] && log[d].w) ? log[d].w : "";
+const netOf  = d => log[d] ? Math.max(log[d].a - (log[d].o||0), 0) : undefined;
+
 const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
   ...opts, headers:{apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY,
     "Content-Type":"application/json", Prefer:"resolution=merge-duplicates", ...(opts.headers||{})}});
 
 async function load(){
   if(remote){
-    const r = await sb("spend_days?select=day,amount");
+    const r = await sb("spend_days?select=day,amount,owed,who");
     if(!r.ok) throw new Error("HTTP "+r.status);
-    log = Object.fromEntries((await r.json()).map(x=>[x.day, Number(x.amount)]));
-  } else log = JSON.parse(localStorage.getItem("spend-challenge") || "{}");
+    log = Object.fromEntries((await r.json()).map(x =>
+      [x.day, {a:Number(x.amount), o:Number(x.owed||0), w:x.who||""}]));
+  } else {
+    const raw = JSON.parse(localStorage.getItem("spend-challenge") || "{}");
+    log = Object.fromEntries(Object.entries(raw).map(([k,v]) =>
+      [k, typeof v === "number" ? {a:v,o:0,w:""} : v]));
+  }
 }
-async function persist(day, amount){
+async function persist(day, rec){
   if(remote){
-    const r = await sb("spend_days", {method:"POST", body:JSON.stringify({day, amount})});
+    const r = await sb("spend_days", {method:"POST",
+      body:JSON.stringify({day, amount:rec.a, owed:rec.o, who:rec.w || null})});
     if(!r.ok) throw new Error("HTTP "+r.status);
   } else localStorage.setItem("spend-challenge", JSON.stringify(log));
 }
@@ -152,36 +197,37 @@ async function remove(day){
 }
 
 function engine(){
-  let spent=0, skim=0; const rows=[];
+  let spent=0, skim=0, owed=0; const rows=[];
   for(const day of DAYS){
     const left = TOTAL - spent - skim;
-    const ahead = DAYS.filter(d => d>=day && log[d]===undefined);
+    const ahead = DAYS.filter(d => d>=day && amtOf(d)===undefined);
     const lond = ahead.reduce((a,d)=>a+(LONDON[d]||0),0);
     const norm = ahead.filter(d=>!LONDON[d]).length;
     const allow = LONDON[day] ?? (norm>0 ? Math.max((left-lond)/norm,0) : 0);
-    const v = log[day];
-    if(v===undefined){ rows.push({day,allow,spend:null}); continue; }
-    const diff = allow - v;
+    const net = netOf(day);
+    if(net===undefined){ rows.push({day,allow,net:null}); continue; }
+    const diff = allow - net;
     if(diff>0) skim += diff*0.3;
-    spent += v;
-    rows.push({day,allow,spend:v,diff});
+    spent += net;
+    owed  += owedOf(day);
+    rows.push({day, allow, net, diff, owed:owedOf(day), who:whoOf(day), paid:amtOf(day)});
   }
-  return {rows, spent, skim, left: TOTAL-spent-skim, proj: TARGET+skim};
+  const left = TOTAL - spent - skim;
+  return {rows, spent, skim, left, owed, totalLeft: left + skim, proj: TARGET + skim};
 }
 
 function streak(){
-  const done = DAYS.filter(d=>log[d]!==undefined);
+  const done = DAYS.filter(d=>amtOf(d)!==undefined);
   if(!done.length) return {n:0, broken:false};
   const last = done[done.length-1];
   let n=0, i=DAYS.indexOf(last);
-  while(i>=0 && log[DAYS[i]]!==undefined){ n++; i--; }
+  while(i>=0 && amtOf(DAYS[i])!==undefined){ n++; i--; }
   const t = todayISO();
-  return {n, broken: DAYS.some(d => d < t && d < last && log[d]===undefined)};
+  return {n, broken: DAYS.some(d => d < t && d < last && amtOf(d)===undefined)};
 }
 
-function nextUnlogged(){ return DAYS.find(d=>log[d]===undefined) || DAYS[DAYS.length-1]; }
+function nextUnlogged(){ return DAYS.find(d=>amtOf(d)===undefined) || DAYS[DAYS.length-1]; }
 
-// count up to the new figure instead of swapping it
 function rollTo(el, to){
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const from = shownNum;
@@ -199,10 +245,10 @@ function rollTo(el, to){
 }
 
 function render(){
-  const {rows,spent,left,proj} = engine();
+  const E = engine();
   if(!pinned) target = nextUnlogged();
-  const row = rows.find(r=>r.day===target);
-  const editing = log[target]!==undefined;
+  const row = E.rows.find(r=>r.day===target);
+  const editing = amtOf(target)!==undefined;
 
   document.getElementById("heroLbl").textContent =
     (editing ? "EDITING \u00b7 " : "ALLOWANCE \u00b7 ") + lbl(target);
@@ -216,33 +262,52 @@ function render(){
     tag.textContent = "LDN";
   } else if(tag) tag.remove();
 
-  const done = rows.filter(r=>r.spend!==null);
+  const done = E.rows.filter(r=>r.net!==null);
   const sched = done.reduce((a,r)=>a+r.diff,0);
   const st = streak();
 
   const totals = [
     ["DAYS LOGGED", done.length + " / " + DAYS.length, ""],
     ["STREAK", st.n === 0 ? "\u2014" : st.n, st.broken ? "bad" : "brass"],
-    ["SPENT", money(spent), ""],
-    ["BUDGET LEFT", money(left), ""],
-    ["VS SCHEDULE", (sched>=0?"+":"\u2212")+money(Math.abs(sched)), sched>=0?"good":"bad"],
-    ["PROJECTED SAVED", money(proj), proj>=TARGET?"good":"bad"]
+    ["SPENT", money(E.spent), ""],
+    ["BUDGET LEFT", money(E.left), ""],
+    ["SAVED SO FAR", money(E.skim), "good"],
+    ["VS SCHEDULE", (sched>=0?"+":"\u2212")+money(Math.abs(sched)), sched>=0?"good":"bad"]
   ];
-  document.getElementById("totals").innerHTML = totals.map(([k,v,c])=>
-    `<div class="tot"><span class="k">${k}</span><span class="dots"></span>
-     <span class="v" style="${c==="good"?"color:var(--good)":c==="bad"?"color:var(--bad)":c==="brass"?"color:var(--brass)":""}">${v}</span></div>`
-  ).join("");
+  let html = totals.map(([k,v,c])=>line(k,v,c)).join("");
+  html += '<hr class="rule" style="margin:8px 0">';
+  html += line("TOTAL LEFT", money(E.totalLeft), "", true);
+  if(E.owed > 0){
+    html += line("OWED TO YOU", money(E.owed), "brass");
+    html += line("ON HAND", money(E.totalLeft - E.owed), "");
+  }
+  html += line("PROJECTED SAVED", money(E.proj), E.proj>=TARGET?"good":"bad");
+  document.getElementById("totals").innerHTML = html;
+
+  // debts
+  const debts = E.rows.filter(r=>r.net!==null && r.owed>0);
+  const wrap = document.getElementById("debtsWrap");
+  wrap.style.display = debts.length ? "block" : "none";
+  document.getElementById("debts").innerHTML = debts.map(r=>
+    `<div class="debt"><span class="dd">${lbl(r.day)}</span>
+      <span class="dw">${r.who || "\u2014"}</span>
+      <span class="da">${money(r.owed)}</span>
+      <button data-settle="${r.day}">SETTLE</button></div>`).join("");
+  [...document.querySelectorAll("[data-settle]")].forEach(b=>{
+    b.onclick = e => { e.stopPropagation(); settle(b.dataset.settle); };
+  });
 
   document.getElementById("logBtn").textContent = editing ? "UPDATE" : "LOG";
   document.getElementById("clearBtn").style.display = editing ? "block" : "none";
 
   const t = todayISO();
-  document.getElementById("ledger").innerHTML = rows.map((r,i)=>{
-    const on = r.spend!==null;
+  document.getElementById("ledger").innerHTML = E.rows.map((r,i)=>{
+    const on = r.net!==null;
     const cls = ["day", on?(r.diff>=0?"ok":"over"):"future", r.day===t?"today":"",
                  r.day===target?"sel":"", (!on && r.day<t)?"miss":""].join(" ");
     const delay = firstPaint ? `animation-delay:${Math.min(i*18,420)}ms` : "";
-    const val = on ? money(r.spend) : (r.day<t ? "MISSED" : "\u2014");
+    const mark = (on && r.owed>0) ? '<span class="mk">\u25E6</span>' : "";
+    const val = on ? money(r.net)+mark : (r.day<t ? "MISSED" : "\u2014");
     return `<div class="${cls} ${firstPaint?"print":""}" style="${delay}" data-day="${r.day}">
       <span class="d">${lbl(r.day)}</span>
       <span class="a">${money(r.allow)}</span>
@@ -253,12 +318,39 @@ function render(){
   [...document.querySelectorAll(".day")].forEach(el=>{
     el.onclick = () => {
       pinned = true; target = el.dataset.day;
-      const cur = log[target];
-      document.getElementById("amt").value = cur!==undefined ? cur : "";
+      const rec = log[target];
+      document.getElementById("amt").value = rec ? rec.a : "";
+      document.getElementById("owedAmt").value = rec && rec.o ? rec.o : "";
+      document.getElementById("owedWho").value = rec ? (rec.w||"") : "";
+      setOwedOpen(!!(rec && rec.o));
       render();
       document.getElementById("amt").focus();
     };
   });
+
+  updateNote();
+}
+
+function line(k, v, c, big){
+  const col = c==="good"?"color:var(--good)":c==="bad"?"color:var(--bad)":c==="brass"?"color:var(--brass)":"";
+  return `<div class="tot${big?" total":""}"><span class="k">${k}</span>
+    <span class="dots"></span><span class="v" style="${col}">${v}</span></div>`;
+}
+
+function setOwedOpen(on){
+  document.getElementById("owedFields").classList.toggle("on", on);
+  document.getElementById("owedToggle").textContent = on ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
+}
+
+function updateNote(){
+  const note = document.getElementById("owedNote");
+  const open = document.getElementById("owedFields").classList.contains("on");
+  const a = parseFloat((document.getElementById("amt").value||"").replace(",","."));
+  const o = parseFloat((document.getElementById("owedAmt").value||"").replace(",","."));
+  if(open && !isNaN(a) && !isNaN(o) && o>=0 && o<=a){
+    note.style.display = "block";
+    note.innerHTML = "COUNTS AS <strong>"+money(a-o)+"</strong> AGAINST BUDGET";
+  } else note.style.display = "none";
 }
 
 function say(msg, err){
@@ -274,29 +366,67 @@ async function boot(){
 
 document.getElementById("logBtn").onclick = async () => {
   const el = document.getElementById("amt");
-  const v = parseFloat(el.value.replace(",","."));
-  if(isNaN(v) || v<0) return say("ENTER A NUMBER", true);
-  const day = target, prev = {...log};
-  log[day] = v; render(); say("SAVING\u2026");
+  const a = parseFloat(el.value.replace(",","."));
+  if(isNaN(a) || a<0) return say("ENTER A NUMBER", true);
+  const open = document.getElementById("owedFields").classList.contains("on");
+  let o = 0, w = "";
+  if(open){
+    o = parseFloat((document.getElementById("owedAmt").value||"0").replace(",",".")) || 0;
+    w = document.getElementById("owedWho").value.trim();
+    if(o < 0) return say("OWED CANNOT BE NEGATIVE", true);
+    if(o > a) return say("OWED IS MORE THAN THE TOTAL", true);
+  }
+  const day = target, prev = JSON.parse(JSON.stringify(log));
+  log[day] = {a, o, w};
+  render(); say("SAVING\u2026");
   try{
-    await persist(day, v);
-    el.value=""; pinned=false; render();
-    say((remote?"SYNCED":"SAVED")+" \u00b7 "+lbl(day));
+    await persist(day, log[day]);
+    el.value=""; document.getElementById("owedAmt").value="";
+    document.getElementById("owedWho").value=""; setOwedOpen(false);
+    pinned=false; render();
+    say((remote?"SYNCED":"SAVED")+" \u00b7 "+lbl(day)+(o>0 ? " \u00b7 "+money(o)+" OWED" : ""));
   }catch(e){ log = prev; render(); say("NOT SAVED \u00b7 "+e.message, true); }
 };
 
+async function settle(day){
+  const rec = log[day];
+  if(!rec || !rec.o) return;
+  const prev = JSON.parse(JSON.stringify(log));
+  const back = rec.o;
+  log[day] = {a: rec.a, o: 0, w: rec.w};
+  render(); say("SETTLING\u2026");
+  try{ await persist(day, log[day]); say("SETTLED \u00b7 "+money(back)+" BACK"); }
+  catch(e){ log = prev; render(); say("NOT SETTLED \u00b7 "+e.message, true); }
+}
+
 document.getElementById("clearBtn").onclick = async () => {
   const day = target;
-  if(log[day]===undefined) return;
-  const prev = {...log};
+  if(amtOf(day)===undefined) return;
+  const prev = JSON.parse(JSON.stringify(log));
   delete log[day]; render(); say("CLEARING\u2026");
-  try{ await remove(day); document.getElementById("amt").value=""; pinned=false; render();
-    say("CLEARED \u00b7 "+lbl(day)); }
+  try{ await remove(day);
+    document.getElementById("amt").value="";
+    document.getElementById("owedAmt").value="";
+    document.getElementById("owedWho").value=""; setOwedOpen(false);
+    pinned=false; render(); say("CLEARED \u00b7 "+lbl(day)); }
   catch(e){ log = prev; render(); say("NOT CLEARED \u00b7 "+e.message, true); }
 };
 
+document.getElementById("owedToggle").onclick = () => {
+  const open = document.getElementById("owedFields").classList.contains("on");
+  setOwedOpen(!open);
+  if(!open) document.getElementById("owedAmt").focus();
+  else { document.getElementById("owedAmt").value=""; document.getElementById("owedWho").value=""; }
+  updateNote();
+};
+
 document.getElementById("todayBtn").onclick = () => {
-  pinned = false; document.getElementById("amt").value = ""; render();
+  pinned = false;
+  document.getElementById("amt").value = "";
+  document.getElementById("owedAmt").value = "";
+  document.getElementById("owedWho").value = "";
+  setOwedOpen(false);
+  render();
   say("BACK TO NEXT UNLOGGED DAY");
 };
 
@@ -309,10 +439,13 @@ document.getElementById("exp").onclick = () => {
   d.showModal();
 };
 
+["amt","owedAmt"].forEach(id =>
+  document.getElementById(id).addEventListener("input", updateNote));
 document.getElementById("amt").addEventListener("keydown", e => {
   if(e.key==="Enter") document.getElementById("logBtn").click();
 });
 
 boot();
+
 
 </script>
