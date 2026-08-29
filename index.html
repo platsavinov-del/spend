@@ -164,8 +164,9 @@ let draft = [];   // debts being entered for the current day: [{a, w}]
 
 const amtOf  = d => log[d] ? log[d].a : undefined;
 const debtsOf= d => (log[d] && Array.isArray(log[d].d)) ? log[d].d : [];
-const owedOf = d => debtsOf(d).reduce((s,x)=>s+(Number(x.a)||0),0);
-const netOf  = d => log[d] ? Math.max(log[d].a - owedOf(d), 0) : undefined;
+const owedOf = d => debtsOf(d).filter(x=>!x.s).reduce((s,x)=>s+(Number(x.a)||0),0);
+const forOthers = d => debtsOf(d).reduce((s,x)=>s+(Number(x.a)||0),0);
+const netOf  = d => log[d] ? Math.max(log[d].a - forOthers(d), 0) : undefined;
 
 const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
   ...opts, headers:{apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY,
@@ -222,7 +223,7 @@ function engine(){
     rows.push({day, allow, net, diff, debts:debtsOf(day), owed:owedOf(day), paid:amtOf(day)});
   }
   const left = TOTAL - spent - skim;
-  return {rows, spent, skim, left, owed, totalLeft: left + skim, proj: TARGET + skim};
+  return {rows, spent, skim, left, owed, totalLeft: TARGET + skim + left, proj: TARGET + skim};
 }
 
 function streak(){
@@ -352,7 +353,7 @@ function render(){
   // one line per person, each settled on its own
   const open = [];
   E.rows.filter(r=>r.net!==null).forEach(r=>
-    r.debts.forEach((e,i)=> open.push({day:r.day, i, a:e.a, w:e.w})));
+    r.debts.forEach((e,i)=> { if(!e.s) open.push({day:r.day, i, a:e.a, w:e.w}); }));
   const wrap = document.getElementById("debtsWrap");
   wrap.style.display = open.length ? "block" : "none";
   document.getElementById("debtsCount").textContent =
@@ -437,7 +438,7 @@ async function settle(day, idx){
   if(!rec || !rec.d[idx]) return;
   const prev = JSON.parse(JSON.stringify(log));
   const e = rec.d[idx];
-  rec.d.splice(idx,1);
+  e.s = true;
   render(); say("SETTLING\u2026");
   try{ await persist(day, rec);
     say("SETTLED \u00b7 "+money(e.a)+" BACK"+(e.w?" FROM "+e.w.toUpperCase():"")); }
