@@ -95,8 +95,14 @@
   .debt .dw{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .debt .da{color:var(--brass);font-variant-numeric:tabular-nums}
   .debt button{padding:3px 8px;font-size:9px;letter-spacing:.1em}
+  .owed-fields{display:none;flex-direction:column;gap:6px;margin-top:6px}
+  .owed-fields.on{display:flex}
+  .owed-row{display:flex;gap:6px;align-items:stretch}
+  .owed-row .fld{flex:1;border:1px solid var(--rule);display:flex}
+  .drop{background:transparent;color:var(--ink-2);border:1px solid var(--rule);
+    padding:0 10px;font-size:14px;line-height:1}
+  .ghost.mini{margin-top:0;padding:7px;font-size:10px}
 </style>
-
 <div class="slip">
   <div class="head print">SPEND CHALLENGE</div>
   <div class="sub print">12 AUG — 11 SEP · GLASGOW</div>
@@ -113,10 +119,7 @@
   </div>
 
   <button class="owed-toggle" id="owedToggle">+ SOMEONE OWES ME</button>
-  <div class="owed-fields" id="owedFields">
-    <label class="fld"><input id="owedAmt" inputmode="decimal" placeholder="0.00"></label>
-    <label class="fld"><input id="owedWho" maxlength="14" placeholder="who"></label>
-  </div>
+  <div class="owed-fields" id="owedFields"></div>
   <div class="owed-note" id="owedNote" style="display:none"></div>
 
   <div class="status" id="status">…</div>
@@ -127,7 +130,7 @@
 
   <div id="debtsWrap" style="display:none">
     <hr class="rule">
-    <div class="lbl" style="margin-bottom:6px">OWED TO YOU</div>
+    <div class="lbl" style="margin-bottom:6px">OWED TO YOU<span id="debtsCount"></span></div>
     <div id="debts"></div>
   </div>
 
@@ -147,9 +150,6 @@
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 
-// ────────────────────────────────────────────
-
-
 const TOTAL = 442, TARGET = 300;
 const LONDON = {"2026-08-14":20,"2026-08-15":45,"2026-08-16":45};
 const DAYS = (()=>{const o=[],d=new Date("2026-08-12T12:00:00Z"),e=new Date("2026-09-11T12:00:00Z");
@@ -160,32 +160,41 @@ const todayISO = () => { const n=new Date(); return new Date(n.getTime()-n.getTi
 
 const remote = !!(SUPABASE_URL && SUPABASE_KEY);
 let log = {}, target = null, pinned = false, firstPaint = true, shownNum = null;
+let draft = [];   // debts being entered for the current day: [{a, w}]
 
 const amtOf  = d => log[d] ? log[d].a : undefined;
-const owedOf = d => (log[d] && log[d].o) ? log[d].o : 0;
-const whoOf  = d => (log[d] && log[d].w) ? log[d].w : "";
-const netOf  = d => log[d] ? Math.max(log[d].a - (log[d].o||0), 0) : undefined;
+const debtsOf= d => (log[d] && Array.isArray(log[d].d)) ? log[d].d : [];
+const owedOf = d => debtsOf(d).reduce((s,x)=>s+(Number(x.a)||0),0);
+const netOf  = d => log[d] ? Math.max(log[d].a - owedOf(d), 0) : undefined;
 
 const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
   ...opts, headers:{apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY,
     "Content-Type":"application/json", Prefer:"resolution=merge-duplicates", ...(opts.headers||{})}});
 
+function normalise(x){
+  let d = [];
+  if(Array.isArray(x.debts) && x.debts.length) d = x.debts.map(e=>({a:Number(e.a)||0, w:e.w||""}));
+  else if(Number(x.owed) > 0) d = [{a:Number(x.owed), w:x.who||""}];   // migrate old single debt
+  return {a:Number(x.amount), d};
+}
+
 async function load(){
   if(remote){
-    const r = await sb("spend_days?select=day,amount,owed,who");
+    const r = await sb("spend_days?select=day,amount,owed,who,debts");
     if(!r.ok) throw new Error("HTTP "+r.status);
-    log = Object.fromEntries((await r.json()).map(x =>
-      [x.day, {a:Number(x.amount), o:Number(x.owed||0), w:x.who||""}]));
+    log = Object.fromEntries((await r.json()).map(x => [x.day, normalise(x)]));
   } else {
     const raw = JSON.parse(localStorage.getItem("spend-challenge") || "{}");
     log = Object.fromEntries(Object.entries(raw).map(([k,v]) =>
-      [k, typeof v === "number" ? {a:v,o:0,w:""} : v]));
+      [k, typeof v === "number" ? {a:v,d:[]} : (v.d ? v : {a:v.a, d:v.o>0?[{a:v.o,w:v.w||""}]:[]})]));
   }
 }
 async function persist(day, rec){
+  const owed = rec.d.reduce((s,x)=>s+x.a,0);
+  const who  = rec.d.length ? rec.d.map(x=>x.w).filter(Boolean).join(", ") : null;
   if(remote){
     const r = await sb("spend_days", {method:"POST",
-      body:JSON.stringify({day, amount:rec.a, owed:rec.o, who:rec.w || null})});
+      body:JSON.stringify({day, amount:rec.a, owed, who, debts:rec.d})});
     if(!r.ok) throw new Error("HTTP "+r.status);
   } else localStorage.setItem("spend-challenge", JSON.stringify(log));
 }
@@ -210,7 +219,7 @@ function engine(){
     if(diff>0) skim += diff*0.3;
     spent += net;
     owed  += owedOf(day);
-    rows.push({day, allow, net, diff, owed:owedOf(day), who:whoOf(day), paid:amtOf(day)});
+    rows.push({day, allow, net, diff, debts:debtsOf(day), owed:owedOf(day), paid:amtOf(day)});
   }
   const left = TOTAL - spent - skim;
   return {rows, spent, skim, left, owed, totalLeft: left + skim, proj: TARGET + skim};
@@ -244,6 +253,63 @@ function rollTo(el, to){
   })(performance.now());
 }
 
+function line(k, v, c, big){
+  const col = c==="good"?"color:var(--good)":c==="bad"?"color:var(--bad)":c==="brass"?"color:var(--brass)":"";
+  return `<div class="tot${big?" total":""}"><span class="k">${k}</span>
+    <span class="dots"></span><span class="v" style="${col}">${v}</span></div>`;
+}
+
+// ---- draft rows (the people who owe you for the day being entered) ----
+function renderDraft(){
+  const box = document.getElementById("owedFields");
+  box.innerHTML = draft.map((e,i)=>`
+    <div class="owed-row">
+      <label class="fld"><input class="dAmt" data-i="${i}" inputmode="decimal"
+        placeholder="0.00" value="${e.a || ""}"></label>
+      <label class="fld"><input class="dWho" data-i="${i}" maxlength="14"
+        placeholder="who" value="${e.w || ""}"></label>
+      <button class="drop" data-drop="${i}">\u00d7</button>
+    </div>`).join("") +
+    (draft.length ? `<button class="ghost mini" id="addRow">+ ADD ANOTHER PERSON</button>` : "");
+
+  [...box.querySelectorAll(".dAmt")].forEach(el=>{
+    el.oninput = () => { draft[+el.dataset.i].a = parseFloat(el.value.replace(",","."))||0; updateNote(); };
+  });
+  [...box.querySelectorAll(".dWho")].forEach(el=>{
+    el.oninput = () => { draft[+el.dataset.i].w = el.value; };
+  });
+  [...box.querySelectorAll("[data-drop]")].forEach(b=>{
+    b.onclick = () => { draft.splice(+b.dataset.drop,1); renderDraft(); updateNote();
+      if(!draft.length) setOwedOpen(false); };
+  });
+  const add = document.getElementById("addRow");
+  if(add) add.onclick = () => { draft.push({a:0,w:""}); renderDraft();
+    [...box.querySelectorAll(".dAmt")].pop().focus(); };
+  box.classList.toggle("on", draft.length>0);
+}
+
+function setOwedOpen(on){
+  if(on && !draft.length) draft = [{a:0,w:""}];
+  if(!on) draft = [];
+  renderDraft();
+  document.getElementById("owedToggle").textContent =
+    draft.length ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
+  updateNote();
+}
+
+function draftTotal(){ return draft.reduce((s,e)=>s+(Number(e.a)||0),0); }
+
+function updateNote(){
+  const note = document.getElementById("owedNote");
+  const a = parseFloat((document.getElementById("amt").value||"").replace(",","."));
+  const o = draftTotal();
+  if(draft.length && !isNaN(a) && o>0 && o<=a){
+    note.style.display = "block";
+    note.innerHTML = "COUNTS AS <strong>"+money(a-o)+"</strong> AGAINST BUDGET" +
+      (draft.length>1 ? " \u00b7 "+draft.length+" PEOPLE" : "");
+  } else note.style.display = "none";
+}
+
 function render(){
   const E = engine();
   if(!pinned) target = nextUnlogged();
@@ -266,15 +332,14 @@ function render(){
   const sched = done.reduce((a,r)=>a+r.diff,0);
   const st = streak();
 
-  const totals = [
+  let html = [
     ["DAYS LOGGED", done.length + " / " + DAYS.length, ""],
     ["STREAK", st.n === 0 ? "\u2014" : st.n, st.broken ? "bad" : "brass"],
     ["SPENT", money(E.spent), ""],
     ["BUDGET LEFT", money(E.left), ""],
     ["SAVED SO FAR", money(E.skim), "good"],
     ["VS SCHEDULE", (sched>=0?"+":"\u2212")+money(Math.abs(sched)), sched>=0?"good":"bad"]
-  ];
-  let html = totals.map(([k,v,c])=>line(k,v,c)).join("");
+  ].map(([k,v,c])=>line(k,v,c)).join("");
   html += '<hr class="rule" style="margin:8px 0">';
   html += line("TOTAL LEFT", money(E.totalLeft), "", true);
   if(E.owed > 0){
@@ -284,17 +349,21 @@ function render(){
   html += line("PROJECTED SAVED", money(E.proj), E.proj>=TARGET?"good":"bad");
   document.getElementById("totals").innerHTML = html;
 
-  // debts
-  const debts = E.rows.filter(r=>r.net!==null && r.owed>0);
+  // one line per person, each settled on its own
+  const open = [];
+  E.rows.filter(r=>r.net!==null).forEach(r=>
+    r.debts.forEach((e,i)=> open.push({day:r.day, i, a:e.a, w:e.w})));
   const wrap = document.getElementById("debtsWrap");
-  wrap.style.display = debts.length ? "block" : "none";
-  document.getElementById("debts").innerHTML = debts.map(r=>
-    `<div class="debt"><span class="dd">${lbl(r.day)}</span>
-      <span class="dw">${r.who || "\u2014"}</span>
-      <span class="da">${money(r.owed)}</span>
-      <button data-settle="${r.day}">SETTLE</button></div>`).join("");
+  wrap.style.display = open.length ? "block" : "none";
+  document.getElementById("debtsCount").textContent =
+    open.length>1 ? " \u00b7 "+open.length : "";
+  document.getElementById("debts").innerHTML = open.map(o=>
+    `<div class="debt"><span class="dd">${lbl(o.day)}</span>
+      <span class="dw">${o.w || "\u2014"}</span>
+      <span class="da">${money(o.a)}</span>
+      <button data-settle="${o.day}" data-idx="${o.i}">SETTLE</button></div>`).join("");
   [...document.querySelectorAll("[data-settle]")].forEach(b=>{
-    b.onclick = e => { e.stopPropagation(); settle(b.dataset.settle); };
+    b.onclick = e => { e.stopPropagation(); settle(b.dataset.settle, +b.dataset.idx); };
   });
 
   document.getElementById("logBtn").textContent = editing ? "UPDATE" : "LOG";
@@ -306,7 +375,8 @@ function render(){
     const cls = ["day", on?(r.diff>=0?"ok":"over"):"future", r.day===t?"today":"",
                  r.day===target?"sel":"", (!on && r.day<t)?"miss":""].join(" ");
     const delay = firstPaint ? `animation-delay:${Math.min(i*18,420)}ms` : "";
-    const mark = (on && r.owed>0) ? '<span class="mk">\u25E6</span>' : "";
+    const mark = (on && r.debts.length) ?
+      `<span class="mk">${"\u25E6".repeat(Math.min(r.debts.length,3))}</span>` : "";
     const val = on ? money(r.net)+mark : (r.day<t ? "MISSED" : "\u2014");
     return `<div class="${cls} ${firstPaint?"print":""}" style="${delay}" data-day="${r.day}">
       <span class="d">${lbl(r.day)}</span>
@@ -320,9 +390,10 @@ function render(){
       pinned = true; target = el.dataset.day;
       const rec = log[target];
       document.getElementById("amt").value = rec ? rec.a : "";
-      document.getElementById("owedAmt").value = rec && rec.o ? rec.o : "";
-      document.getElementById("owedWho").value = rec ? (rec.w||"") : "";
-      setOwedOpen(!!(rec && rec.o));
+      draft = rec ? rec.d.map(e=>({a:e.a, w:e.w})) : [];
+      renderDraft();
+      document.getElementById("owedToggle").textContent =
+        draft.length ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
       render();
       document.getElementById("amt").focus();
     };
@@ -331,35 +402,13 @@ function render(){
   updateNote();
 }
 
-function line(k, v, c, big){
-  const col = c==="good"?"color:var(--good)":c==="bad"?"color:var(--bad)":c==="brass"?"color:var(--brass)":"";
-  return `<div class="tot${big?" total":""}"><span class="k">${k}</span>
-    <span class="dots"></span><span class="v" style="${col}">${v}</span></div>`;
-}
-
-function setOwedOpen(on){
-  document.getElementById("owedFields").classList.toggle("on", on);
-  document.getElementById("owedToggle").textContent = on ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
-}
-
-function updateNote(){
-  const note = document.getElementById("owedNote");
-  const open = document.getElementById("owedFields").classList.contains("on");
-  const a = parseFloat((document.getElementById("amt").value||"").replace(",","."));
-  const o = parseFloat((document.getElementById("owedAmt").value||"").replace(",","."));
-  if(open && !isNaN(a) && !isNaN(o) && o>=0 && o<=a){
-    note.style.display = "block";
-    note.innerHTML = "COUNTS AS <strong>"+money(a-o)+"</strong> AGAINST BUDGET";
-  } else note.style.display = "none";
-}
-
 function say(msg, err){
   const el = document.getElementById("status");
   el.textContent = msg; el.className = "status" + (err?" err":"");
 }
 
 async function boot(){
-  try{ await load(); render();
+  try{ await load(); renderDraft(); render();
     say((remote ? "SYNCED" : "THIS DEVICE") + " \u00b7 " + Object.keys(log).length + " DAYS ON FILE");
   }catch(e){ say("COULD NOT LOAD \u00b7 "+e.message, true); render(); }
 }
@@ -368,35 +417,31 @@ document.getElementById("logBtn").onclick = async () => {
   const el = document.getElementById("amt");
   const a = parseFloat(el.value.replace(",","."));
   if(isNaN(a) || a<0) return say("ENTER A NUMBER", true);
-  const open = document.getElementById("owedFields").classList.contains("on");
-  let o = 0, w = "";
-  if(open){
-    o = parseFloat((document.getElementById("owedAmt").value||"0").replace(",",".")) || 0;
-    w = document.getElementById("owedWho").value.trim();
-    if(o < 0) return say("OWED CANNOT BE NEGATIVE", true);
-    if(o > a) return say("OWED IS MORE THAN THE TOTAL", true);
-  }
+  const d = draft.filter(e => (Number(e.a)||0) > 0).map(e=>({a:Number(e.a), w:(e.w||"").trim()}));
+  const o = d.reduce((s,x)=>s+x.a,0);
+  if(o > a) return say("OWED IS MORE THAN THE TOTAL", true);
   const day = target, prev = JSON.parse(JSON.stringify(log));
-  log[day] = {a, o, w};
+  log[day] = {a, d};
   render(); say("SAVING\u2026");
   try{
     await persist(day, log[day]);
-    el.value=""; document.getElementById("owedAmt").value="";
-    document.getElementById("owedWho").value=""; setOwedOpen(false);
+    el.value=""; draft=[]; renderDraft(); setOwedOpen(false);
     pinned=false; render();
-    say((remote?"SYNCED":"SAVED")+" \u00b7 "+lbl(day)+(o>0 ? " \u00b7 "+money(o)+" OWED" : ""));
+    say((remote?"SYNCED":"SAVED")+" \u00b7 "+lbl(day) +
+        (d.length ? " \u00b7 "+money(o)+" OWED BY "+d.length : ""));
   }catch(e){ log = prev; render(); say("NOT SAVED \u00b7 "+e.message, true); }
 };
 
-async function settle(day){
+async function settle(day, idx){
   const rec = log[day];
-  if(!rec || !rec.o) return;
+  if(!rec || !rec.d[idx]) return;
   const prev = JSON.parse(JSON.stringify(log));
-  const back = rec.o;
-  log[day] = {a: rec.a, o: 0, w: rec.w};
+  const e = rec.d[idx];
+  rec.d.splice(idx,1);
   render(); say("SETTLING\u2026");
-  try{ await persist(day, log[day]); say("SETTLED \u00b7 "+money(back)+" BACK"); }
-  catch(e){ log = prev; render(); say("NOT SETTLED \u00b7 "+e.message, true); }
+  try{ await persist(day, rec);
+    say("SETTLED \u00b7 "+money(e.a)+" BACK"+(e.w?" FROM "+e.w.toUpperCase():"")); }
+  catch(err){ log = prev; render(); say("NOT SETTLED \u00b7 "+err.message, true); }
 }
 
 document.getElementById("clearBtn").onclick = async () => {
@@ -405,27 +450,17 @@ document.getElementById("clearBtn").onclick = async () => {
   const prev = JSON.parse(JSON.stringify(log));
   delete log[day]; render(); say("CLEARING\u2026");
   try{ await remove(day);
-    document.getElementById("amt").value="";
-    document.getElementById("owedAmt").value="";
-    document.getElementById("owedWho").value=""; setOwedOpen(false);
+    document.getElementById("amt").value=""; draft=[]; renderDraft(); setOwedOpen(false);
     pinned=false; render(); say("CLEARED \u00b7 "+lbl(day)); }
   catch(e){ log = prev; render(); say("NOT CLEARED \u00b7 "+e.message, true); }
 };
 
-document.getElementById("owedToggle").onclick = () => {
-  const open = document.getElementById("owedFields").classList.contains("on");
-  setOwedOpen(!open);
-  if(!open) document.getElementById("owedAmt").focus();
-  else { document.getElementById("owedAmt").value=""; document.getElementById("owedWho").value=""; }
-  updateNote();
-};
+document.getElementById("owedToggle").onclick = () => setOwedOpen(draft.length===0);
 
 document.getElementById("todayBtn").onclick = () => {
   pinned = false;
   document.getElementById("amt").value = "";
-  document.getElementById("owedAmt").value = "";
-  document.getElementById("owedWho").value = "";
-  setOwedOpen(false);
+  draft = []; renderDraft(); setOwedOpen(false);
   render();
   say("BACK TO NEXT UNLOGGED DAY");
 };
@@ -439,13 +474,11 @@ document.getElementById("exp").onclick = () => {
   d.showModal();
 };
 
-["amt","owedAmt"].forEach(id =>
-  document.getElementById(id).addEventListener("input", updateNote));
+document.getElementById("amt").addEventListener("input", updateNote);
 document.getElementById("amt").addEventListener("keydown", e => {
   if(e.key==="Enter") document.getElementById("logBtn").click();
 });
 
 boot();
-
 
 </script>
