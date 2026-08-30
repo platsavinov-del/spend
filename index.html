@@ -174,7 +174,7 @@ const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
 
 function normalise(x){
   let d = [];
-  if(Array.isArray(x.debts) && x.debts.length) d = x.debts.map(e=>({a:Number(e.a)||0, w:e.w||""}));
+  if(Array.isArray(x.debts) && x.debts.length) d = x.debts.map(e=>({a:Number(e.a)||0, w:e.w||"", s:!!e.s}));
   else if(Number(x.owed) > 0) d = [{a:Number(x.owed), w:x.who||""}];   // migrate old single debt
   return {a:Number(x.amount), d};
 }
@@ -391,7 +391,7 @@ function render(){
       pinned = true; target = el.dataset.day;
       const rec = log[target];
       document.getElementById("amt").value = rec ? rec.a : "";
-      draft = rec ? rec.d.map(e=>({a:e.a, w:e.w})) : [];
+      draft = rec ? rec.d.map(e=>({a:e.a, w:e.w, s:e.s})) : [];
       renderDraft();
       document.getElementById("owedToggle").textContent =
         draft.length ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
@@ -418,7 +418,7 @@ document.getElementById("logBtn").onclick = async () => {
   const el = document.getElementById("amt");
   const a = parseFloat(el.value.replace(",","."));
   if(isNaN(a) || a<0) return say("ENTER A NUMBER", true);
-  const d = draft.filter(e => (Number(e.a)||0) > 0).map(e=>({a:Number(e.a), w:(e.w||"").trim()}));
+  const d = draft.filter(e => (Number(e.a)||0) > 0).map(e=>({a:Number(e.a), w:(e.w||"").trim(), s:!!e.s}));
   const o = d.reduce((s,x)=>s+x.a,0);
   if(o > a) return say("OWED IS MORE THAN THE TOTAL", true);
   const day = target, prev = JSON.parse(JSON.stringify(log));
