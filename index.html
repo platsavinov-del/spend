@@ -55,7 +55,9 @@
   .day{display:flex;align-items:center;gap:8px;padding:6px 4px;font-size:12px;
     cursor:pointer;position:relative;transition:background .15s}
   .day:hover{background:var(--paper-2)}
-  .day .d{width:62px;color:var(--ink-2)}
+  .day .d{width:76px;color:var(--ink-2)}
+  .day.we .d{color:var(--ink);font-weight:700}
+  .day.sel.we .d{color:var(--paper)}
   .day .a{flex:1;text-align:right;color:var(--fade);font-variant-numeric:tabular-nums}
   .day .s{width:74px;text-align:right;font-variant-numeric:tabular-nums}
   .day.future{color:var(--fade)}
@@ -156,6 +158,10 @@ const DAYS = (()=>{const o=[],d=new Date("2026-08-12T12:00:00Z"),e=new Date("202
   while(d<=e){o.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);}return o;})();
 const money = n => "\u00a3" + n.toFixed(2);
 const lbl = s => new Date(s+"T12:00:00Z").toLocaleDateString("en-GB",{day:"2-digit",month:"short",timeZone:"UTC"}).toUpperCase();
+const WD = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+const dow  = s => new Date(s+"T12:00:00Z").getUTCDay();
+const isWE = s => dow(s)===0 || dow(s)===6;
+const lblWk = s => WD[dow(s)] + " " + s.slice(8,10);
 const todayISO = () => { const n=new Date(); return new Date(n.getTime()-n.getTimezoneOffset()*6e4).toISOString().slice(0,10); };
 
 const remote = !!(SUPABASE_URL && SUPABASE_KEY);
@@ -374,13 +380,13 @@ function render(){
   document.getElementById("ledger").innerHTML = E.rows.map((r,i)=>{
     const on = r.net!==null;
     const cls = ["day", on?(r.diff>=0?"ok":"over"):"future", r.day===t?"today":"",
-                 r.day===target?"sel":"", (!on && r.day<t)?"miss":""].join(" ");
+                 r.day===target?"sel":"", (!on && r.day<t)?"miss":"", isWE(r.day)?"we":""].join(" ");
     const delay = firstPaint ? `animation-delay:${Math.min(i*18,420)}ms` : "";
     const mark = (on && r.debts.length) ?
       `<span class="mk">${"\u25E6".repeat(Math.min(r.debts.length,3))}</span>` : "";
     const val = on ? money(r.net)+mark : (r.day<t ? "MISSED" : "\u2014");
     return `<div class="${cls} ${firstPaint?"print":""}" style="${delay}" data-day="${r.day}">
-      <span class="d">${lbl(r.day)}</span>
+      <span class="d">${lblWk(r.day)}</span>
       <span class="a">${money(r.allow)}</span>
       <span class="s">${val}</span></div>`;
   }).join("");
