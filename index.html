@@ -216,7 +216,7 @@ function engine(){
   let spent=0, skim=0, owed=0; const rows=[];
   for(const day of DAYS){
     const left = TOTAL - spent - skim;
-    const ahead = DAYS.filter(d => d>=day && amtOf(d)===undefined);
+    const ahead = DAYS.filter(d => d>=day);   // days remaining AS OF this day - never rewrite history
     const lond = ahead.reduce((a,d)=>a+(LONDON[d]||0),0);
     const norm = ahead.filter(d=>!LONDON[d]).length;
     const allow = LONDON[day] ?? (norm>0 ? Math.max((left-lond)/norm,0) : 0);
