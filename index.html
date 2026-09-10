@@ -104,10 +104,37 @@
   .drop{background:transparent;color:var(--ink-2);border:1px solid var(--rule);
     padding:0 10px;font-size:14px;line-height:1}
   .ghost.mini{margin-top:0;padding:7px;font-size:10px}
+
+  .seg{display:flex;border:1px solid var(--ink);margin-top:10px}
+  .seg button{flex:1;background:transparent;color:var(--ink-2);padding:9px 0;font-size:9px;
+    letter-spacing:.12em;border-right:1px solid var(--rule)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--ink);color:var(--paper)}
+  .pot{padding:9px 0;border-bottom:1px dotted var(--rule)}
+  .pot:last-child{border-bottom:0}
+  .pot .pt{display:flex;justify-content:space-between;align-items:baseline;font-size:12px}
+  .pot .pk{letter-spacing:.12em;color:var(--ink-2)}
+  .pot .pv{font-variant-numeric:tabular-nums;font-weight:700}
+  .pot.neg .pv{color:var(--bad)}
+  .bar{height:5px;background:var(--paper-2);margin-top:7px;position:relative;overflow:hidden}
+  .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink)}
+  .bar i.b{background:var(--brass)}
+  .bar i.o{background:var(--bad)}
+  .pot .ps{font-size:10px;color:var(--fade);margin-top:5px;letter-spacing:.06em;
+    display:flex;justify-content:space-between}
+  .buy{display:flex;gap:8px;align-items:center;font-size:11px;padding:5px 0;
+    border-bottom:1px dotted var(--rule)}
+  .buy .bd{width:52px;color:var(--ink-2)}
+  .buy .bw{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .buy .ba{font-variant-numeric:tabular-nums}
+  .buy button{padding:3px 8px;font-size:9px;letter-spacing:.1em}
+  .owed-row .fld{min-width:0}
+  .owed-row input{min-width:0;width:100%}
+  #note{flex:1.6}
 </style>
 <div class="slip">
   <div class="head print">SPEND CHALLENGE</div>
-  <div class="sub print">12 AUG — 11 SEP · GLASGOW</div>
+  <div class="sub print" id="periodLbl">—</div>
   <hr class="rule print">
 
   <div class="print" style="animation-delay:.05s">
@@ -117,7 +144,14 @@
 
   <div class="row-in print" style="animation-delay:.1s">
     <input id="amt" inputmode="decimal" placeholder="0.00">
+    <input id="note" placeholder="what did you buy?" maxlength="22" style="display:none">
     <button id="logBtn">LOG</button>
+  </div>
+
+  <div class="seg print" id="seg" style="animation-delay:.12s">
+    <button data-pocket="daily" class="on">DAILY</button>
+    <button data-pocket="wardrobe">WARDROBE</button>
+    <button data-pocket="pleasure">PLEASURE</button>
   </div>
 
   <button class="owed-toggle" id="owedToggle">+ SOMEONE OWES ME</button>
@@ -127,8 +161,15 @@
   <div class="status" id="status">…</div>
   <button class="ghost" id="clearBtn" style="display:none">CLEAR THIS DAY</button>
 
+  <div id="buysWrap" style="display:none">
+    <hr class="rule">
+    <div class="lbl" style="margin-bottom:6px" id="buysLbl"></div>
+    <div id="buys"></div>
+  </div>
+
   <hr class="rule">
-  <div id="totals"></div>
+  <div class="lbl" style="margin-bottom:4px">POTS · WHOLE PERIOD</div>
+  <div id="potsBox"></div>
 
   <div id="debtsWrap" style="display:none">
     <hr class="rule">
@@ -137,8 +178,17 @@
   </div>
 
   <hr class="rule">
-  <div class="lbl" style="margin-bottom:6px">DETAIL · TAP A DAY TO EDIT</div>
-  <div id="ledger"></div>
+  <div id="totals"></div>
+
+  <hr class="rule">
+  <div class="lbl" style="margin-bottom:6px">FIXED · CHARGED</div>
+  <div id="fixed"></div>
+
+  <div id="ledgerWrap">
+    <hr class="rule">
+    <div class="lbl" style="margin-bottom:6px">DETAIL · TAP A DAY TO EDIT</div>
+    <div id="ledger"></div>
+  </div>
 
   <hr class="rule">
   <button class="ghost" id="todayBtn">GO TO NEXT UNLOGGED DAY</button>
@@ -148,31 +198,56 @@
 </div>
 
 <dialog id="dlg"></dialog>
+
 <script>
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 
-const TOTAL = 442, TARGET = 300;
-const LONDON = {"2026-08-14":20,"2026-08-15":45,"2026-08-16":45};
-const DAYS = (()=>{const o=[],d=new Date("2026-08-12T12:00:00Z"),e=new Date("2026-09-11T12:00:00Z");
+// ---------------------------------------------------------------- period
+// One place to change when a new pay period starts.
+const P = {
+  label:  "10 SEP — 11 OCT · GLASGOW",
+  from:   "2026-09-10",
+  to:     "2026-10-11",
+  daily:  500,        // day-to-day money, split across the period, 70/30 rule
+  savings:1000,       // set aside from salary before anything is spent
+  fixed:  [["CLAUDE", 18], ["APPLE MUSIC", 5.99]],
+  london: {}          // days with a fixed allowance, e.g. {"2026-09-20":45}
+};
+// Pots are whole-period wallets. They are NOT split per day and never touch
+// the daily allowance. Going over is allowed and shown in red.
+const POTS = [["wardrobe","WARDROBE",200], ["pleasure","PLEASURE",103.57]];
+const CAP  = Object.fromEntries(POTS.map(([k,,c]) => [k,c]));
+const PNAME= Object.fromEntries(POTS.map(([k,n]) => [k,n]));
+const isPot= k => k !== "daily";
+
+const TOTAL = P.daily, LONDON = P.london;
+const DAYS = (()=>{const o=[],d=new Date(P.from+"T12:00:00Z"),e=new Date(P.to+"T12:00:00Z");
   while(d<=e){o.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1);}return o;})();
-const money = n => "\u00a3" + n.toFixed(2);
+
+const money = n => (n<0 ? "−£" : "£") + Math.abs(n).toFixed(2);
 const lbl = s => new Date(s+"T12:00:00Z").toLocaleDateString("en-GB",{day:"2-digit",month:"short",timeZone:"UTC"}).toUpperCase();
 const WD = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 const dow  = s => new Date(s+"T12:00:00Z").getUTCDay();
 const isWE = s => dow(s)===0 || dow(s)===6;
 const lblWk = s => WD[dow(s)] + " " + s.slice(8,10);
 const todayISO = () => { const n=new Date(); return new Date(n.getTime()-n.getTimezoneOffset()*6e4).toISOString().slice(0,10); };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 const remote = !!(SUPABASE_URL && SUPABASE_KEY);
-let log = {}, target = null, pinned = false, firstPaint = true, shownNum = null;
-let draft = [];   // debts being entered for the current day: [{a, w}]
+let log = {}, buys = [], target = null, pinned = false, firstPaint = true, shownNum = null;
+let draft = [];            // people who owe you for the day being entered: [{a,w,s}]
+let pocket = "daily";      // daily | wardrobe | pleasure
 
 const amtOf  = d => log[d] ? log[d].a : undefined;
 const debtsOf= d => (log[d] && Array.isArray(log[d].d)) ? log[d].d : [];
 const owedOf = d => debtsOf(d).filter(x=>!x.s).reduce((s,x)=>s+(Number(x.a)||0),0);
 const forOthers = d => debtsOf(d).reduce((s,x)=>s+(Number(x.a)||0),0);
 const netOf  = d => log[d] ? Math.max(log[d].a - forOthers(d), 0) : undefined;
+
+const buysOf  = k => buys.filter(b => b.pot===k);
+const potSpent= k => buysOf(k).reduce((s,b)=>s+b.a, 0);
+const potLeft = k => CAP[k] - potSpent(k);
 
 const sb = (path, opts={}) => fetch(SUPABASE_URL+"/rest/v1/"+path, {
   ...opts, headers:{apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY,
@@ -187,15 +262,24 @@ function normalise(x){
 
 async function load(){
   if(remote){
-    const r = await sb("spend_days?select=day,amount,owed,who,debts");
+    // only this period - earlier challenges stay in the table untouched
+    const r = await sb("spend_days?select=day,amount,owed,who,debts"
+      + "&day=gte."+P.from + "&day=lte."+P.to);
     if(!r.ok) throw new Error("HTTP "+r.status);
     log = Object.fromEntries((await r.json()).map(x => [x.day, normalise(x)]));
+    const r2 = await sb("spend_pots?select=id,pot,day,amount,note&order=day.desc,created_at.desc");
+    if(!r2.ok) throw new Error("POTS HTTP "+r2.status);
+    buys = (await r2.json()).map(x=>({id:x.id, pot:x.pot, day:x.day,
+      a:Number(x.amount), note:x.note||""}));
   } else {
     const raw = JSON.parse(localStorage.getItem("spend-challenge") || "{}");
-    log = Object.fromEntries(Object.entries(raw).map(([k,v]) =>
-      [k, typeof v === "number" ? {a:v,d:[]} : (v.d ? v : {a:v.a, d:v.o>0?[{a:v.o,w:v.w||""}]:[]})]));
+    log  = raw.log || {};
+    buys = raw.buys || [];
   }
 }
+const cacheLocal = () =>
+  localStorage.setItem("spend-challenge", JSON.stringify({log, buys}));
+
 async function persist(day, rec){
   const owed = rec.d.reduce((s,x)=>s+x.a,0);
   const who  = rec.d.length ? rec.d.map(x=>x.w).filter(Boolean).join(", ") : null;
@@ -203,20 +287,39 @@ async function persist(day, rec){
     const r = await sb("spend_days", {method:"POST",
       body:JSON.stringify({day, amount:rec.a, owed, who, debts:rec.d})});
     if(!r.ok) throw new Error("HTTP "+r.status);
-  } else localStorage.setItem("spend-challenge", JSON.stringify(log));
+  } else cacheLocal();
 }
 async function remove(day){
   if(remote){
     const r = await sb("spend_days?day=eq."+day, {method:"DELETE"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-  } else localStorage.setItem("spend-challenge", JSON.stringify(log));
+  } else cacheLocal();
+}
+async function addBuy(b){
+  if(remote){
+    const r = await sb("spend_pots", {method:"POST", headers:{Prefer:"return=representation"},
+      body:JSON.stringify({pot:b.pot, day:b.day, amount:b.a, note:b.note || null})});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const row = (await r.json())[0];
+    b.id = row.id;
+  } else { b.id = "L"+Date.now(); cacheLocal(); }
+  return b;
+}
+async function dropBuy(id){
+  if(remote){
+    const r = await sb("spend_pots?id=eq."+encodeURIComponent(id), {method:"DELETE"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+  } else cacheLocal();
 }
 
+// ---------------------------------------------------------------- engine
 function engine(){
   let spent=0, skim=0, owed=0; const rows=[];
   for(const day of DAYS){
     const left = TOTAL - spent - skim;
-    const ahead = DAYS.filter(d => d>=day);   // days remaining AS OF this day - never rewrite history
+    // days still to come AS OF this day - includes the day itself, and does not
+    // change when a later day gets logged (otherwise history is rewritten)
+    const ahead = DAYS.filter(d => d>=day);
     const lond = ahead.reduce((a,d)=>a+(LONDON[d]||0),0);
     const norm = ahead.filter(d=>!LONDON[d]).length;
     const allow = LONDON[day] ?? (norm>0 ? Math.max((left-lond)/norm,0) : 0);
@@ -229,7 +332,10 @@ function engine(){
     rows.push({day, allow, net, diff, debts:debtsOf(day), owed:owedOf(day), paid:amtOf(day)});
   }
   const left = TOTAL - spent - skim;
-  return {rows, spent, skim, left, owed, totalLeft: TARGET + skim + left, proj: TARGET + skim};
+  const potsLeft = POTS.reduce((s,[k])=>s+potLeft(k), 0);
+  return {rows, spent, skim, left, owed,
+          totalLeft: P.savings + skim + left + potsLeft,
+          proj: P.savings + skim};
 }
 
 function streak(){
@@ -274,8 +380,8 @@ function renderDraft(){
       <label class="fld"><input class="dAmt" data-i="${i}" inputmode="decimal"
         placeholder="0.00" value="${e.a || ""}"></label>
       <label class="fld"><input class="dWho" data-i="${i}" maxlength="14"
-        placeholder="who" value="${e.w || ""}"></label>
-      <button class="drop" data-drop="${i}">\u00d7</button>
+        placeholder="who" value="${esc(e.w || "")}"></label>
+      <button class="drop" data-drop="${i}">×</button>
     </div>`).join("") +
     (draft.length ? `<button class="ghost mini" id="addRow">+ ADD ANOTHER PERSON</button>` : "");
 
@@ -300,7 +406,7 @@ function setOwedOpen(on){
   if(!on) draft = [];
   renderDraft();
   document.getElementById("owedToggle").textContent =
-    draft.length ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
+    draft.length ? "− CANCEL OWED" : "+ SOMEONE OWES ME";
   updateNote();
 }
 
@@ -310,30 +416,94 @@ function updateNote(){
   const note = document.getElementById("owedNote");
   const a = parseFloat((document.getElementById("amt").value||"").replace(",","."));
   const o = draftTotal();
-  if(draft.length && !isNaN(a) && o>0 && o<=a){
+  if(pocket==="daily" && draft.length && !isNaN(a) && o>0 && o<=a){
     note.style.display = "block";
     note.innerHTML = "COUNTS AS <strong>"+money(a-o)+"</strong> AGAINST BUDGET" +
-      (draft.length>1 ? " \u00b7 "+draft.length+" PEOPLE" : "");
+      (draft.length>1 ? " · "+draft.length+" PEOPLE" : "");
   } else note.style.display = "none";
 }
 
+// ---------------------------------------------------------------- pockets
+function setPocket(k){
+  if(pocket === k) return;
+  pocket = k;
+  document.getElementById("amt").value = "";
+  document.getElementById("note").value = "";
+  draft = []; renderDraft(); setOwedOpen(false);
+  shownNum = null;                       // the hero now means something else
+  [...document.querySelectorAll("#seg button")].forEach(b =>
+    b.classList.toggle("on", b.dataset.pocket === k));
+  render();
+}
+
+function renderPots(){
+  document.getElementById("potsBox").innerHTML = POTS.map(([k,name,cap])=>{
+    const spent = potSpent(k), left = cap - spent;
+    const pct = Math.min(spent/cap*100, 100);
+    const cls = k==="pleasure" ? "b" : "";
+    return `<div class="pot${left<0?" neg":""}">
+      <div class="pt"><span class="pk">${name}</span><span class="pv">${money(left)}</span></div>
+      <div class="bar"><i class="${left<0?"o":cls}" style="width:${pct.toFixed(1)}%"></i></div>
+      <div class="ps"><span>SPENT ${money(spent)}</span><span>OF ${money(cap)}</span></div>
+    </div>`;
+  }).join("");
+}
+
+function renderBuys(){
+  const wrap = document.getElementById("buysWrap");
+  if(!isPot(pocket)){ wrap.style.display = "none"; return; }
+  const list = buysOf(pocket);
+  wrap.style.display = "block";
+  document.getElementById("buysLbl").textContent =
+    PNAME[pocket] + " · " + (list.length ? list.length + " ITEM" + (list.length>1?"S":"") : "NOTHING YET");
+  document.getElementById("buys").innerHTML = list.map(b=>
+    `<div class="buy"><span class="bd">${lbl(b.day)}</span>
+      <span class="bw">${esc(b.note) || "—"}</span>
+      <span class="ba">${money(b.a)}</span>
+      <button data-buy="${b.id}">×</button></div>`).join("");
+  [...document.querySelectorAll("[data-buy]")].forEach(b=>{
+    b.onclick = () => killBuy(b.dataset.buy);
+  });
+}
+
+// ---------------------------------------------------------------- render
 function render(){
   const E = engine();
   if(!pinned) target = nextUnlogged();
   const row = E.rows.find(r=>r.day===target);
   const editing = amtOf(target)!==undefined;
+  const potMode = isPot(pocket);
 
-  document.getElementById("heroLbl").textContent =
-    (editing ? "EDITING \u00b7 " : "ALLOWANCE \u00b7 ") + lbl(target);
+  document.getElementById("periodLbl").textContent = P.label;
+
+  document.getElementById("heroLbl").textContent = potMode
+    ? PNAME[pocket] + " LEFT · " + lbl(todayISO())
+    : (editing ? "EDITING · " : "ALLOWANCE · ") + lbl(target);
 
   const hero = document.getElementById("heroNum");
-  if(!hero.firstChild || hero.firstChild.nodeType!==3) hero.textContent = money(row.allow);
-  rollTo(hero, row.allow);
+  const heroVal = potMode ? potLeft(pocket) : row.allow;
+  if(!hero.firstChild || hero.firstChild.nodeType!==3) hero.textContent = money(heroVal);
+  rollTo(hero, heroVal);
+  hero.style.color = (potMode && heroVal < 0) ? "var(--bad)" : "";
   let tag = hero.querySelector(".tag");
-  if(LONDON[target]){
+  if(!potMode && LONDON[target]){
     if(!tag){ tag=document.createElement("span"); tag.className="tag"; hero.appendChild(tag); }
     tag.textContent = "LDN";
   } else if(tag) tag.remove();
+
+  // input row + owed controls belong to DAILY only
+  document.getElementById("note").style.display = potMode ? "block" : "none";
+  document.getElementById("amt").placeholder = "0.00";
+  document.getElementById("logBtn").textContent =
+    potMode ? "ADD" : (editing ? "UPDATE" : "LOG");
+  document.getElementById("owedToggle").style.display = potMode ? "none" : "block";
+  document.getElementById("owedFields").style.display = potMode ? "none" : "";
+  document.getElementById("clearBtn").style.display = (!potMode && editing) ? "block" : "none";
+  document.getElementById("ledgerWrap").style.display = potMode ? "none" : "block";
+  document.getElementById("todayBtn").style.display = potMode ? "none" : "block";
+
+  renderBuys();
+  renderPots();
 
   const done = E.rows.filter(r=>r.net!==null);
   const sched = done.reduce((a,r)=>a+r.diff,0);
@@ -341,11 +511,11 @@ function render(){
 
   let html = [
     ["DAYS LOGGED", done.length + " / " + DAYS.length, ""],
-    ["STREAK", st.n === 0 ? "\u2014" : st.n, st.broken ? "bad" : "brass"],
-    ["SPENT", money(E.spent), ""],
-    ["BUDGET LEFT", money(E.left), ""],
+    ["STREAK", st.n === 0 ? "—" : st.n, st.broken ? "bad" : "brass"],
+    ["DAILY SPENT", money(E.spent), ""],
+    ["DAILY LEFT", money(E.left), E.left<0?"bad":""],
     ["SAVED SO FAR", money(E.skim), "good"],
-    ["VS SCHEDULE", (sched>=0?"+":"\u2212")+money(Math.abs(sched)), sched>=0?"good":"bad"]
+    ["VS SCHEDULE", (sched>=0?"+":"−")+money(Math.abs(sched)), sched>=0?"good":"bad"]
   ].map(([k,v,c])=>line(k,v,c)).join("");
   html += '<hr class="rule" style="margin:8px 0">';
   html += line("TOTAL LEFT", money(E.totalLeft), "", true);
@@ -353,28 +523,31 @@ function render(){
     html += line("OWED TO YOU", money(E.owed), "brass");
     html += line("ON HAND", money(E.totalLeft - E.owed), "");
   }
-  html += line("PROJECTED SAVED", money(E.proj), E.proj>=TARGET?"good":"bad");
+  html += '<hr class="rule" style="margin:8px 0">';
+  html += line("SAVINGS BASE", money(P.savings), "", true);
+  html += line("+ SKIMMED 30%", money(E.skim), "good");
+  html += line("PROJECTED SAVED", money(E.proj), "good");
   document.getElementById("totals").innerHTML = html;
 
-  // one line per person, each settled on its own
+  document.getElementById("fixed").innerHTML =
+    P.fixed.map(([n,a])=>line(n, money(a), "")).join("");
+
+  // one line per person, each settled on its own - DAILY only
   const open = [];
   E.rows.filter(r=>r.net!==null).forEach(r=>
     r.debts.forEach((e,i)=> { if(!e.s) open.push({day:r.day, i, a:e.a, w:e.w}); }));
   const wrap = document.getElementById("debtsWrap");
   wrap.style.display = open.length ? "block" : "none";
   document.getElementById("debtsCount").textContent =
-    open.length>1 ? " \u00b7 "+open.length : "";
+    open.length>1 ? " · "+open.length : "";
   document.getElementById("debts").innerHTML = open.map(o=>
     `<div class="debt"><span class="dd">${lbl(o.day)}</span>
-      <span class="dw">${o.w || "\u2014"}</span>
+      <span class="dw">${esc(o.w) || "—"}</span>
       <span class="da">${money(o.a)}</span>
       <button data-settle="${o.day}" data-idx="${o.i}">SETTLE</button></div>`).join("");
   [...document.querySelectorAll("[data-settle]")].forEach(b=>{
     b.onclick = e => { e.stopPropagation(); settle(b.dataset.settle, +b.dataset.idx); };
   });
-
-  document.getElementById("logBtn").textContent = editing ? "UPDATE" : "LOG";
-  document.getElementById("clearBtn").style.display = editing ? "block" : "none";
 
   const t = todayISO();
   document.getElementById("ledger").innerHTML = E.rows.map((r,i)=>{
@@ -383,8 +556,8 @@ function render(){
                  r.day===target?"sel":"", (!on && r.day<t)?"miss":"", isWE(r.day)?"we":""].join(" ");
     const delay = firstPaint ? `animation-delay:${Math.min(i*18,420)}ms` : "";
     const mark = (on && r.debts.length) ?
-      `<span class="mk">${"\u25E6".repeat(Math.min(r.debts.length,3))}</span>` : "";
-    const val = on ? money(r.net)+mark : (r.day<t ? "MISSED" : "\u2014");
+      `<span class="mk">${"◦".repeat(Math.min(r.debts.length,3))}</span>` : "";
+    const val = on ? money(r.net)+mark : (r.day<t ? "MISSED" : "—");
     return `<div class="${cls} ${firstPaint?"print":""}" style="${delay}" data-day="${r.day}">
       <span class="d">${lblWk(r.day)}</span>
       <span class="a">${money(r.allow)}</span>
@@ -400,7 +573,7 @@ function render(){
       draft = rec ? rec.d.map(e=>({a:e.a, w:e.w, s:e.s})) : [];
       renderDraft();
       document.getElementById("owedToggle").textContent =
-        draft.length ? "\u2212 CANCEL OWED" : "+ SOMEONE OWES ME";
+        draft.length ? "− CANCEL OWED" : "+ SOMEONE OWES ME";
       render();
       document.getElementById("amt").focus();
     };
@@ -416,28 +589,56 @@ function say(msg, err){
 
 async function boot(){
   try{ await load(); renderDraft(); render();
-    say((remote ? "SYNCED" : "THIS DEVICE") + " \u00b7 " + Object.keys(log).length + " DAYS ON FILE");
-  }catch(e){ say("COULD NOT LOAD \u00b7 "+e.message, true); render(); }
+    say((remote ? "SYNCED" : "THIS DEVICE") + " · " +
+        Object.keys(log).length + " DAYS · " + buys.length + " POT ITEMS");
+  }catch(e){ say("COULD NOT LOAD · "+e.message, true); render(); }
 }
 
+// ---------------------------------------------------------------- actions
 document.getElementById("logBtn").onclick = async () => {
   const el = document.getElementById("amt");
-  const a = parseFloat(el.value.replace(",","."));
+  const a = parseFloat((el.value||"").replace(",","."));
   if(isNaN(a) || a<0) return say("ENTER A NUMBER", true);
+
+  if(isPot(pocket)){
+    if(a===0) return say("ENTER A NUMBER", true);
+    const noteEl = document.getElementById("note");
+    const b = {pot:pocket, day:todayISO(), a, note:(noteEl.value||"").trim()};
+    buys.unshift(b); render(); say("SAVING…");
+    try{
+      await addBuy(b);
+      el.value=""; noteEl.value=""; render();
+      const left = potLeft(pocket);
+      say(PNAME[pocket]+" · "+money(a)+(b.note?" · "+b.note.toUpperCase():"") +
+          " · " + (left<0 ? "OVER BY "+money(-left) : money(left)+" LEFT"));
+    }catch(e){ buys = buys.filter(x=>x!==b); render(); say("NOT SAVED · "+e.message, true); }
+    return;
+  }
+
   const d = draft.filter(e => (Number(e.a)||0) > 0).map(e=>({a:Number(e.a), w:(e.w||"").trim(), s:!!e.s}));
   const o = d.reduce((s,x)=>s+x.a,0);
   if(o > a) return say("OWED IS MORE THAN THE TOTAL", true);
   const day = target, prev = JSON.parse(JSON.stringify(log));
   log[day] = {a, d};
-  render(); say("SAVING\u2026");
+  render(); say("SAVING…");
   try{
     await persist(day, log[day]);
     el.value=""; draft=[]; renderDraft(); setOwedOpen(false);
     pinned=false; render();
-    say((remote?"SYNCED":"SAVED")+" \u00b7 "+lbl(day) +
-        (d.length ? " \u00b7 "+money(o)+" OWED BY "+d.length : ""));
-  }catch(e){ log = prev; render(); say("NOT SAVED \u00b7 "+e.message, true); }
+    say((remote?"SYNCED":"SAVED")+" · "+lbl(day) +
+        (d.length ? " · "+money(o)+" OWED BY "+d.length : ""));
+  }catch(e){ log = prev; render(); say("NOT SAVED · "+e.message, true); }
 };
+
+async function killBuy(id){
+  const i = buys.findIndex(b=>String(b.id)===String(id));
+  if(i<0) return;
+  const gone = buys[i];
+  buys.splice(i,1); render(); say("REMOVING…");
+  try{ await dropBuy(id);
+    say("REMOVED · "+money(gone.a)+(gone.note?" · "+gone.note.toUpperCase():"")); }
+  catch(e){ buys.splice(i,0,gone); render(); say("NOT REMOVED · "+e.message, true); }
+}
 
 async function settle(day, idx){
   const rec = log[day];
@@ -445,24 +646,28 @@ async function settle(day, idx){
   const prev = JSON.parse(JSON.stringify(log));
   const e = rec.d[idx];
   e.s = true;
-  render(); say("SETTLING\u2026");
+  render(); say("SETTLING…");
   try{ await persist(day, rec);
-    say("SETTLED \u00b7 "+money(e.a)+" BACK"+(e.w?" FROM "+e.w.toUpperCase():"")); }
-  catch(err){ log = prev; render(); say("NOT SETTLED \u00b7 "+err.message, true); }
+    say("SETTLED · "+money(e.a)+" BACK"+(e.w?" FROM "+e.w.toUpperCase():"")); }
+  catch(err){ log = prev; render(); say("NOT SETTLED · "+err.message, true); }
 }
 
 document.getElementById("clearBtn").onclick = async () => {
   const day = target;
   if(amtOf(day)===undefined) return;
   const prev = JSON.parse(JSON.stringify(log));
-  delete log[day]; render(); say("CLEARING\u2026");
+  delete log[day]; render(); say("CLEARING…");
   try{ await remove(day);
     document.getElementById("amt").value=""; draft=[]; renderDraft(); setOwedOpen(false);
-    pinned=false; render(); say("CLEARED \u00b7 "+lbl(day)); }
-  catch(e){ log = prev; render(); say("NOT CLEARED \u00b7 "+e.message, true); }
+    pinned=false; render(); say("CLEARED · "+lbl(day)); }
+  catch(e){ log = prev; render(); say("NOT CLEARED · "+e.message, true); }
 };
 
 document.getElementById("owedToggle").onclick = () => setOwedOpen(draft.length===0);
+
+[...document.querySelectorAll("#seg button")].forEach(b=>{
+  b.onclick = () => setPocket(b.dataset.pocket);
+});
 
 document.getElementById("todayBtn").onclick = () => {
   pinned = false;
@@ -476,15 +681,15 @@ document.getElementById("exp").onclick = () => {
   const d = document.getElementById("dlg");
   d.innerHTML = `<div style="font-size:11px;letter-spacing:.16em;margin-bottom:8px">BACKUP</div>
     <textarea readonly style="width:100%;height:130px;background:#E0DCD2;color:#1A1C1F;
-      border:1px solid #1A1C1F;padding:8px;font-family:inherit;font-size:11px">${JSON.stringify(log)}</textarea>
+      border:1px solid #1A1C1F;padding:8px;font-family:inherit;font-size:11px">${esc(JSON.stringify({log,buys}))}</textarea>
     <button class="ghost" onclick="document.getElementById('dlg').close()">CLOSE</button>`;
   d.showModal();
 };
 
 document.getElementById("amt").addEventListener("input", updateNote);
-document.getElementById("amt").addEventListener("keydown", e => {
+["amt","note"].forEach(id => document.getElementById(id).addEventListener("keydown", e => {
   if(e.key==="Enter") document.getElementById("logBtn").click();
-});
+}));
 
 boot();
 
