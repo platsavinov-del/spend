@@ -188,6 +188,32 @@
   .fold{cursor:pointer;user-select:none}
   .fold::after{content:" ▾";color:var(--fade)}
   .fold.shut::after{content:" ▸"}
+
+  /* ---- page nav ---- */
+  .nav{display:flex;gap:0;border-top:1px solid var(--ink);border-bottom:1px solid var(--ink);
+    margin:10px 0 12px}
+  .nav button{flex:1;background:transparent;color:var(--ink-2);padding:10px 0;font-size:9px;
+    letter-spacing:.14em;border-right:1px dotted var(--rule)}
+  .nav button:last-child{border-right:0}
+  .nav button.on{background:var(--ink);color:var(--paper)}
+  .page{display:none}
+  .page.on{display:block}
+  .goal{margin:10px 0 4px}
+  .goal .gt{display:flex;justify-content:space-between;align-items:baseline;font-size:12px}
+  .goal .gk{letter-spacing:.12em;color:var(--ink-2)}
+  .goal .gv{font-variant-numeric:tabular-nums;font-weight:700}
+  .goal .gs{font-size:10px;color:var(--fade);margin-top:5px;letter-spacing:.06em;
+    display:flex;justify-content:space-between}
+  .addrow{display:flex;gap:6px;margin-top:8px}
+  .addrow input{border:1px solid var(--rule);min-width:0;font-size:14px;padding:8px}
+  .addrow .who{flex:1.4}
+  .addrow .amt{flex:1}
+  .addrow button{padding:0 12px;font-size:10px;letter-spacing:.1em}
+  .dirseg{display:flex;border:1px solid var(--rule);margin-top:6px}
+  .dirseg button{flex:1;background:transparent;color:var(--ink-2);padding:7px 0;font-size:9px;
+    letter-spacing:.1em;border-right:1px solid var(--rule)}
+  .dirseg button:last-child{border-right:0}
+  .dirseg button.on{background:var(--ink);color:var(--paper)}
 </style>
 <div class="slip" id="gateWrap" style="display:none">
   <div class="head">SPEND CHALLENGE</div>
@@ -213,6 +239,14 @@
     <div class="big" id="heroNum">—</div>
   </div>
 
+  <div class="nav print" id="nav" style="animation-delay:.03s">
+    <button data-page="spend" class="on">SPEND</button>
+    <button data-page="balance">BALANCE</button>
+    <button data-page="savings">SAVINGS</button>
+    <button data-page="debts">DEBTS</button>
+  </div>
+
+  <div class="page on" id="pg-spend">
   <div class="row-in print" style="animation-delay:.1s">
     <input id="amt" inputmode="decimal" placeholder="0.00">
     <button class="cur" id="curBtn">£</button>
@@ -253,18 +287,44 @@
   <hr class="rule">
   <div id="totals"></div>
 
-  <hr class="rule">
-  <div class="lbl fold" id="balFold" style="margin-bottom:6px">BALANCE</div>
-  <div id="balance"></div>
-
-  <hr class="rule">
-  <div class="lbl fold" id="debtFold" style="margin-bottom:6px">DEBTS<span id="debtCount"></span></div>
-  <div id="debtsBox"></div>
-
   <div id="ledgerWrap">
     <hr class="rule">
     <div class="lbl" style="margin-bottom:6px">DETAIL · TAP A DAY</div>
     <div id="ledger"></div>
+  </div>
+  </div><!-- /page spend -->
+
+  <div class="page" id="pg-balance">
+    <div class="lbl" style="margin-bottom:6px">ACCOUNTS</div>
+    <div id="balance"></div>
+    <hr class="rule">
+    <div class="lbl" style="margin-bottom:6px">BY CURRENCY</div>
+    <div id="byCur"></div>
+    <div class="owed-note" id="fxLine" style="display:block"></div>
+  </div>
+
+  <div class="page" id="pg-savings">
+    <div class="lbl" style="margin-bottom:6px">CUSHION · GOAL £10,000</div>
+    <div id="goalBox"></div>
+    <hr class="rule">
+    <div id="savingsTot"></div>
+  </div>
+
+  <div class="page" id="pg-debts">
+    <div class="lbl" style="margin-bottom:6px">OPEN<span id="debtCount"></span></div>
+    <div id="debtsBox"></div>
+    <hr class="rule">
+    <div class="lbl" style="margin-bottom:6px">ADD</div>
+    <div class="dirseg" id="dirSeg">
+      <button data-dir="they_owe_me" class="on">THEY OWE ME</button>
+      <button data-dir="i_owe">I OWE</button>
+    </div>
+    <div class="addrow">
+      <input class="who" id="dWhoNew" placeholder="who" maxlength="20">
+      <input class="amt" id="dAmtNew" inputmode="decimal" placeholder="0.00">
+      <button class="cur" id="dCurNew">£</button>
+      <button id="dAddBtn">ADD</button>
+    </div>
   </div>
 
   <hr class="rule">
@@ -334,8 +394,7 @@ let P=null, tx=[], inbox=[], accounts=[], debts=[], subs=[];
 let fx = {GBP:1}, fxDate = null;
 let DAYS=[], target=null, pinned=false, firstPaint=true, shownNum=null;
 let draft=[], pocket="daily", curIdx=0;
-let shut = {bal:false, debt:false};
-try{ shut = Object.assign(shut, JSON.parse(localStorage.getItem("spend-fold")||"{}")); }catch(e){}
+let page="spend", newDir="they_owe_me", newCurIdx=0;
 
 const toGBP = (a, c) => a / (fx[c] || 1);
 const potCap = k => k==="wardrobe" ? Number(P.wardrobe) : Number(P.pleasure);
@@ -578,9 +637,7 @@ function renderTxList(){
 
 function renderBalance(){
   const B = balanceView();
-  $("balFold").classList.toggle("shut", shut.bal);
   const box = $("balance");
-  if(shut.bal){ box.innerHTML = line("NET WORTH", money(B.net), "", true); return; }
   let h = accounts.map(a=>{
     const g = toGBP(Number(a.balance), a.currency);
     const native = a.currency!=="GBP" ? `<span class="sub">${money(Number(a.balance), a.currency)}</span>` : "";
@@ -606,13 +663,7 @@ function renderDebts(){
   debts.forEach(d => open.push({kind:"row", id:d.id, a:Number(d.amount), w:d.person,
     cur:d.currency, dir:d.direction}));
   $("debtCount").textContent = open.length ? " · " + open.length : "";
-  $("debtFold").classList.toggle("shut", shut.debt);
   const box = $("debtsBox");
-  if(shut.debt){
-    box.innerHTML = line("OWED TO YOU", money(B.owedMe), "brass")
-                  + line("YOU OWE", money(B.iOwe), B.iOwe>0?"bad":"");
-    return;
-  }
   box.innerHTML = open.map(o=>{
     const g = o.cur ? toGBP(o.a, o.cur) : o.a;
     const native = (o.cur && o.cur!=="GBP") ? `<span class="sub">${money(o.a, o.cur)}</span>` : "";
@@ -630,6 +681,59 @@ function renderDebts(){
     b.onclick = () => settle(b.dataset.settle); });
 }
 
+function renderByCurrency(){
+  const by = {};
+  accounts.forEach(a => { const c = a.currency;
+    by[c] = by[c] || {native:0, gbp:0};
+    by[c].native += Number(a.balance);
+    by[c].gbp    += toGBP(Number(a.balance), a.currency); });
+  $("byCur").innerHTML = Object.entries(by).map(([c,v]) =>
+    `<div class="it"><span class="iw">${c}${c!=="GBP"?`<span class="sub">${fx[c].toFixed(4)} per \u00a3</span>`:""}</span>
+      <span class="ia">${money(v.native, c)}${c!=="GBP"?` <span class="sub">${money(v.gbp)}</span>`:""}</span></div>`
+  ).join("");
+  $("fxLine").innerHTML = fxDate
+    ? "ECB RATES \u00b7 " + fxDate : "RATES UNAVAILABLE \u00b7 USING 1:1";
+}
+
+const GOAL = 10000;
+function renderSavings(){
+  const B = balanceView();
+  const E = engine();
+  const pct = Math.min(B.cushion / GOAL * 100, 100);
+  $("goalBox").innerHTML = `<div class="goal">
+      <div class="gt"><span class="gk">HSBC</span><span class="gv">${money(B.cushion)}</span></div>
+      <div class="bar"><i style="width:${pct.toFixed(2)}%"></i></div>
+      <div class="gs"><span>${pct.toFixed(1)}% OF ${money(GOAL)}</span>
+        <span>${money(GOAL - B.cushion)} TO GO</span></div>
+    </div>`;
+  const days = DAYS.length;
+  const perMonth = days > 0 ? Number(P.savings_target) * (30.44 / days) : 0;
+  let h = line("CUSHION \u00b7 HSBC", money(B.cushion), "good");
+  h += line("LOAN CIRCUIT", money(B.loan), "brass");
+  h += line("RESERVE \u00b7 CASH", money(B.reserve), "");
+  h += '<hr class="rule" style="margin:8px 0">';
+  h += line("SAVED \u00b7 TOTAL", money(B.cushion + B.loan), "", true);
+  h += '<hr class="rule" style="margin:8px 0">';
+  h += line("THIS PERIOD \u00b7 PLANNED", money(Number(P.savings_target)), "");
+  h += line("THIS PERIOD \u00b7 SKIMMED", money(E.skim), "good");
+  if(perMonth > 0){
+    h += line("AT THIS RATE \u00b7 PER MONTH", money(perMonth), "");
+    h += line("CUSHION FULL IN",
+      Math.ceil((GOAL - B.cushion) / perMonth) + " MONTHS", "brass");
+  }
+  $("savingsTot").innerHTML = h;
+}
+
+function setPage(p){
+  if(page === p) return;
+  page = p; shownNum = null;
+  [...document.querySelectorAll("#nav button")].forEach(b =>
+    b.classList.toggle("on", b.dataset.page === p));
+  ["spend","balance","savings","debts"].forEach(k =>
+    $("pg-"+k).classList.toggle("on", k === p));
+  render();
+}
+
 function render(){
   const E = engine();
   const t = todayISO();
@@ -637,17 +741,25 @@ function render(){
   const row = E.rows.find(r=>r.day===target) || E.rows[0];
   const potMode = pocket!=="daily";
 
+  const B = balanceView();
   $("periodLbl").textContent = P.label + " · GLASGOW";
-  $("heroLbl").textContent = potMode
-    ? pocket.toUpperCase() + " LEFT"
-    : "ALLOWANCE · " + lbl(target) + (target!==t ? " · PINNED" : "");
+  const heroFor = {
+    spend:   [potMode ? pocket.toUpperCase() + " LEFT"
+                      : "ALLOWANCE · " + lbl(target) + (target!==t ? " · PINNED" : ""),
+              potMode ? potLeft(pocket) : row.allow],
+    balance: ["NET WORTH", B.net],
+    savings: ["SAVED · TOTAL", B.cushion + B.loan],
+    debts:   ["NET OWED TO YOU", B.owedMe - B.iOwe]
+  }[page];
+  $("heroLbl").textContent = heroFor[0];
   const hero = $("heroNum");
-  const val = potMode ? potLeft(pocket) : row.allow;
+  const val = heroFor[1];
   if(!hero.firstChild || hero.firstChild.nodeType!==3) hero.textContent = money(val);
   rollTo(hero, val);
   hero.style.color = val < 0 ? "var(--bad)" : "";
 
   $("logBtn").textContent = potMode ? "ADD" : "LOG";
+  $("debtCount").textContent = "";
   $("owedToggle").style.display = potMode ? "none" : "block";
   $("owedFields").style.display = potMode ? "none" : "";
   $("zeroBtn").style.display = (!potMode && !logged(target)) ? "block" : "none";
@@ -655,7 +767,10 @@ function render(){
   $("todayBtn").style.display = (pinned && !potMode) ? "block" : "none";
   $("curBtn").textContent = SYM[CUR[curIdx]];
 
-  renderUnfiled(); renderTxList(); renderPots(); renderBalance(); renderDebts();
+  if(page === "spend"){ renderUnfiled(); renderTxList(); renderPots(); }
+  if(page === "balance"){ renderBalance(); renderByCurrency(); }
+  if(page === "savings"){ renderSavings(); }
+  if(page === "debts"){ renderDebts(); }
 
   const done = E.rows.filter(r=>r.net!==null);
   const sched = done.reduce((a,r)=>a+r.diff, 0);
@@ -787,6 +902,32 @@ async function settle(key){
 // ------------------------------------------------------------------ chrome wiring
 [...document.querySelectorAll("#seg button")].forEach(b=>{
   b.onclick = () => setPocket(b.dataset.pocket); });
+[...document.querySelectorAll("#nav button")].forEach(b=>{
+  b.onclick = () => setPage(b.dataset.page); });
+[...document.querySelectorAll("#dirSeg button")].forEach(b=>{
+  b.onclick = () => { newDir = b.dataset.dir;
+    [...document.querySelectorAll("#dirSeg button")].forEach(x =>
+      x.classList.toggle("on", x.dataset.dir === newDir)); }; });
+$("dCurNew").onclick = () => { newCurIdx = (newCurIdx+1) % CUR.length;
+  $("dCurNew").textContent = SYM[CUR[newCurIdx]]; };
+$("dAddBtn").onclick = async () => {
+  const who = ($("dWhoNew").value||"").trim(), a = num($("dAmtNew").value);
+  if(!who) return say("WHO?", true);
+  if(a===null || a<=0) return say("ENTER A NUMBER", true);
+  const cur = CUR[newCurIdx];
+  say("SAVING\u2026");
+  try{
+    const made = await api("spend_debts", {method:"POST", headers:{Prefer:"return=representation"},
+      body:JSON.stringify({person:who, direction:newDir, amount:a, currency:cur})});
+    debts.push(made[0]);
+    $("dWhoNew").value=""; $("dAmtNew").value="";
+    render();
+    say((newDir==="i_owe" ? "YOU OWE " : "OWES YOU ") + who.toUpperCase()
+        + " \u00b7 " + money(a, cur));
+  }catch(e){ say("NOT SAVED \u00b7 "+e.message, true); }
+};
+["dWhoNew","dAmtNew"].forEach(id => $(id).addEventListener("keydown", e => {
+  if(e.key==="Enter") $("dAddBtn").click(); }));
 $("curBtn").onclick = () => { curIdx = (curIdx+1) % CUR.length;
   $("curBtn").textContent = SYM[CUR[curIdx]]; updateNote(); };
 $("owedToggle").onclick = () => setOwedOpen(draft.length===0);
@@ -794,10 +935,6 @@ $("todayBtn").onclick = () => { pinned = false; render(); say("BACK TO TODAY"); 
 $("amt").addEventListener("input", updateNote);
 ["amt","note"].forEach(id => $(id).addEventListener("keydown", e => {
   if(e.key==="Enter") $("logBtn").click(); }));
-const fold = (el, key) => $(el).onclick = () => { shut[key] = !shut[key];
-  try{ localStorage.setItem("spend-fold", JSON.stringify(shut)); }catch(e){}
-  render(); };
-fold("balFold","bal"); fold("debtFold","debt");
 
 $("exp").onclick = () => {
   const d = $("dlg");
