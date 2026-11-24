@@ -395,6 +395,7 @@ let fx = {GBP:1}, fxDate = null;
 let DAYS=[], target=null, pinned=false, firstPaint=true, shownNum=null;
 let draft=[], pocket="daily", curIdx=0;
 let page="spend", newDir="they_owe_me", newCurIdx=0;
+let inboxCur = {};   // id -> currency the import guessed wrong
 
 const toGBP = (a, c) => a / (fx[c] || 1);
 const potCap = k => k==="wardrobe" ? Number(P.wardrobe) : Number(P.pleasure);
@@ -569,24 +570,33 @@ function renderUnfiled(){
   wrap.style.display = inbox.length ? "block" : "none";
   $("unfiledCount").textContent = inbox.length ? " · " + inbox.length : "";
   $("unfiled").innerHTML = inbox.map(x=>{
-    const g = toGBP(Number(x.amount), x.currency);
+    const c = inboxCur[x.id] || x.currency;
+    const g = toGBP(Number(x.amount), c);
     const when = new Date(x.occurred_at);
     const stamp = when.toLocaleDateString("en-GB",{day:"2-digit",month:"short"}).toUpperCase()
       + " · " + when.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})
       + (x.card ? " · " + esc(x.card) : "");
-    const orig = x.currency!=="GBP" ? " · was "+money(Number(x.amount), x.currency) : "";
+    const orig = c!=="GBP" ? " · charged "+money(Number(x.amount), c) : "";
     return `<div class="unf" data-in="${x.id}">
       <div class="top"><span class="m">${esc(x.merchant) || "—"}</span>
         <span class="a">${money(g)}</span></div>
       <div class="when">${stamp}${orig}</div>
       <input class="inote" placeholder="what for?" maxlength="24" value="${esc(x.merchant)}">
       <div class="acts">
+        <button class="skip" data-cur="${x.id}">${SYM[c]}</button>
         <button data-file="daily">DAILY</button>
         <button data-file="wardrobe">WARD</button>
         <button data-file="pleasure">PLEAS</button>
         <button class="skip" data-file="ignored">×</button>
       </div></div>`;
   }).join("");
+  [...document.querySelectorAll("[data-cur]")].forEach(b=>{
+    b.onclick = () => { const id = b.dataset.cur;
+      const row = inbox.find(x=>x.id===id); if(!row) return;
+      const now = inboxCur[id] || row.currency;
+      inboxCur[id] = CUR[(CUR.indexOf(now)+1) % CUR.length];
+      renderUnfiled(); };
+  });
   [...document.querySelectorAll("[data-in]")].forEach(card=>{
     [...card.querySelectorAll("[data-file]")].forEach(b=>{
       b.onclick = () => fileInbox(card.dataset.in, b.dataset.file,
@@ -864,12 +874,13 @@ async function fileInbox(id, where, note){
   try{
     let txId = null;
     if(where !== "ignored"){
-      const gbp = Math.round(toGBP(Number(item.amount), item.currency)*100)/100;
+      const cur = inboxCur[item.id] || item.currency;
+      const gbp = Math.round(toGBP(Number(item.amount), cur)*100)/100;
       const made = await addTx({
         day: item.occurred_at.slice(0,10), pocket: where, amount: gbp,
         note: (note||item.merchant||"").trim() || null, debts: [], source:"wallet",
         inbox_id: item.id, orig_amount: Number(item.amount),
-        orig_currency: item.currency, fx_rate: fx[item.currency] || 1},
+        orig_currency: cur, fx_rate: fx[cur] || 1},
         "FILED · " + where.toUpperCase() + " · " + money(gbp));
       txId = made.id;
     }
