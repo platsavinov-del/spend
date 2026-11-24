@@ -329,6 +329,7 @@
 
   <hr class="rule">
   <button class="ghost" id="todayBtn">BACK TO TODAY</button>
+  <button class="ghost" id="setupBtn">SHORTCUT SETUP</button>
   <button class="ghost" id="exp">EXPORT BACKUP</button>
   <button class="ghost" id="outBtn">SIGN OUT</button>
   <div class="barcode"></div>
@@ -390,7 +391,7 @@ async function api(path, opts={}){
 }
 
 // ------------------------------------------------------------------ state
-let P=null, tx=[], inbox=[], accounts=[], debts=[], subs=[];
+let P=null, tx=[], inbox=[], accounts=[], debts=[], subs=[], conf={};
 let fx = {GBP:1}, fxDate = null;
 let DAYS=[], target=null, pinned=false, firstPaint=true, shownNum=null;
 let draft=[], pocket="daily", curIdx=0;
@@ -440,6 +441,8 @@ async function load(){
     api("spend_debts?select=*&settled=is.false&order=amount.desc"),
     api("spend_subs?select=*&active=is.true")
   ]);
+  try{ const c = await api("spend_config?select=key,value");
+       conf = Object.fromEntries(c.map(r=>[r.key, r.value])); }catch(e){ conf = {}; }
 }
 
 // ------------------------------------------------------------------ engine
@@ -947,6 +950,33 @@ $("amt").addEventListener("input", updateNote);
 ["amt","note"].forEach(id => $(id).addEventListener("keydown", e => {
   if(e.key==="Enter") $("logBtn").click(); }));
 
+$("setupBtn").onclick = () => {
+  const d = $("dlg");
+  const key = conf.import_key || "\u2014 NOT SET \u2014";
+  const fld = (k,v) => `<div style="margin-bottom:10px">
+      <div style="font-size:9px;letter-spacing:.14em;color:#4A4741">${k}</div>
+      <textarea readonly rows="${v.length>60?2:1}" onclick="this.select()"
+        style="width:100%;background:#E0DCD2;color:#1A1C1F;border:1px solid #1A1C1F;
+        padding:7px;font-family:inherit;font-size:11px;resize:none">${esc(v)}</textarea></div>`;
+  d.innerHTML = `<div style="font-size:11px;letter-spacing:.16em;margin-bottom:10px">SHORTCUT \u00b7 TAP TO COPY</div>
+    <div style="font-size:10px;color:#4A4741;letter-spacing:.04em;margin-bottom:10px">
+      ONE ACTION: GET CONTENTS OF URL \u00b7 METHOD POST</div>
+    ${fld("URL", SUPABASE_URL+"/rest/v1/spend_inbox")}
+    ${fld("HEADER apikey", SUPABASE_KEY)}
+    ${fld("HEADER x-import-key", key)}
+    ${fld("HEADER Content-Type", "application/json")}
+    ${fld("HEADER Prefer", "return=minimal")}
+    <div style="font-size:10px;color:#4A4741;letter-spacing:.04em;margin:12px 0 6px">
+      REQUEST BODY \u00b7 JSON</div>
+    <div style="font-size:11px;line-height:1.7">
+      <strong>amount</strong> (Number) \u2014 Shortcut Input \u203a Amount<br>
+      <strong>currency</strong> (Text) \u2014 EUR or GBP, per card<br>
+      <strong>merchant</strong> (Text) \u2014 Shortcut Input \u203a Merchant<br>
+      <strong>card</strong> (Text) \u2014 Shortcut Input \u203a Card</div>
+    <button class="ghost" onclick="document.getElementById('dlg').close()">CLOSE</button>`;
+  d.showModal();
+};
+
 $("exp").onclick = () => {
   const d = $("dlg");
   d.innerHTML = `<div style="font-size:11px;letter-spacing:.16em;margin-bottom:8px">BACKUP</div>
@@ -977,6 +1007,8 @@ $("outBtn").onclick = () => { saveSession(null); location.reload(); };
 
 async function boot(){
   if(!session) return showGate("");
+  try{ await ensureFresh(); }
+  catch(e){ saveSession(null); return showGate("SIGN IN AGAIN"); }
   $("gateWrap").style.display = "none";
   $("app").style.display = "block";
   try{
