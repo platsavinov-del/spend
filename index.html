@@ -346,7 +346,8 @@ const CUR  = ["GBP","EUR","USD"];
 const SYM  = {GBP:"£", EUR:"€", USD:"$"};
 
 // ------------------------------------------------------------------ helpers
-const money = (n, c="GBP") => (n<0 ? "−" : "") + SYM[c] + Math.abs(n).toFixed(2);
+const money = (n, c="GBP") =>
+  (n<0 ? "−" : "") + (SYM[c] || (c + "\u00a0")) + Math.abs(n).toFixed(2);
 const lbl   = s => new Date(s+"T12:00:00Z").toLocaleDateString("en-GB",{day:"2-digit",month:"short",timeZone:"UTC"}).toUpperCase();
 const WD    = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 const dow   = s => new Date(s+"T12:00:00Z").getUTCDay();
@@ -701,7 +702,7 @@ function renderByCurrency(){
     by[c].native += Number(a.balance);
     by[c].gbp    += toGBP(Number(a.balance), a.currency); });
   $("byCur").innerHTML = Object.entries(by).map(([c,v]) =>
-    `<div class="it"><span class="iw">${c}${c!=="GBP"?`<span class="sub">${fx[c].toFixed(4)} per \u00a3</span>`:""}</span>
+    `<div class="it"><span class="iw">${c}${c!=="GBP"?`<span class="sub">${(fx[c]||1).toFixed(4)} per \u00a3</span>`:""}</span>
       <span class="ia">${money(v.native, c)}${c!=="GBP"?` <span class="sub">${money(v.gbp)}</span>`:""}</span></div>`
   ).join("");
   $("fxLine").innerHTML = fxDate
@@ -824,11 +825,18 @@ function render(){
 }
 
 // ------------------------------------------------------------------ actions
+// Spends and settlements move money between accounts inside the database, so
+// the balances held here go stale the moment one of those actions succeeds.
+async function refreshAccounts(){
+  try{ accounts = await api("spend_accounts?select=*&order=sort"); }catch(e){}
+}
+
 async function addTx(rec, msg){
   const made = await api("spend_tx", {method:"POST", headers:{Prefer:"return=representation"},
     body:JSON.stringify(rec)});
   tx.unshift(made[0]);
   render(); say(msg);
+  await refreshAccounts(); render();
   return made[0];
 }
 
@@ -866,6 +874,7 @@ async function killTx(id){
   const i = tx.findIndex(t=>t.id===id); if(i<0) return;
   const gone = tx[i]; tx.splice(i,1); render(); say("REMOVING…");
   try{ await api("spend_tx?id=eq."+id, {method:"DELETE"});
+    await refreshAccounts(); render();
     say("REMOVED · " + money(Number(gone.amount))); }
   catch(e){ tx.splice(i,0,gone); render(); say("NOT REMOVED · "+e.message, true); }
 }
@@ -902,13 +911,16 @@ async function settle(key){
       debts.splice(i,1); render();
       await api("spend_debts?id=eq."+id, {method:"PATCH",
         body:JSON.stringify({settled:true, settled_at:new Date().toISOString()})});
-      say("SETTLED · " + esc(gone.person) + " · " + money(Number(gone.amount), gone.currency));
+      await refreshAccounts(); render();
+      say("SETTLED · " + esc(gone.person) + " · " + money(Number(gone.amount), gone.currency)
+          + (gone.direction === "i_owe" ? " · PAID FROM THE CARD" : " · ONTO HSBC"));
     } else {
       const t = tx.find(x=>x.id===id); if(!t) return;
       const d = (Array.isArray(t.debts)?t.debts:[]).map((e,i)=> i===+idx ? {...e, s:true} : e);
       t.debts = d; render();
       await api("spend_tx?id=eq."+id, {method:"PATCH", body:JSON.stringify({debts:d})});
-      say("SETTLED · " + money(Number(d[+idx].a)) + " BACK");
+      await refreshAccounts(); render();
+      say("SETTLED · " + money(Number(d[+idx].a)) + " BACK · ONTO HSBC");
     }
   }catch(e){ say("NOT SETTLED · "+e.message, true); boot(); }
 }
