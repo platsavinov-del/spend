@@ -360,11 +360,12 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
     </section>
 
     <button type="button" class="tear">TOOLS</button>
+    <button type="button" class="ghost" id="updBtn">ОБНОВИТЬ ПРИЛОЖЕНИЕ</button>
     <button type="button" class="ghost" id="setupBtn">SHORTCUT SETUP</button>
     <button type="button" class="ghost" id="expBtn">EXPORT BACKUP</button>
     <button type="button" class="ghost" id="outBtn">SIGN OUT</button>
     <div class="barcode"></div>
-    <div class="end">— КОНЕЦ ЛЕНТЫ —</div>
+    <div class="end">ВЕРСИЯ <span id="buildLbl">—</span> · КОНЕЦ ЛЕНТЫ</div>
   </main>
 
   <form class="dock" id="dock" autocomplete="off">
@@ -391,6 +392,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
+const BUILD = "2026-11-26-0215";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
@@ -1250,6 +1252,34 @@ $("expBtn").onclick = () => {
   d.showModal();
 };
 $("outBtn").onclick = () => { saveSession(null); location.reload(); };
+$("updBtn").onclick = () => checkUpdate(true);
+
+// ------------------------------------------------------------------ updates
+// GitHub serves this page with max-age=600, so a phone can hold an old copy
+// for ten minutes and a standalone app for much longer. The page therefore
+// checks for itself and reloads through a fresh URL, which no cache has seen.
+let lastCheck = 0;
+async function checkUpdate(manual){
+  if(!manual && Date.now() - lastCheck < 120000) return;
+  lastCheck = Date.now();
+  if(manual) say("ПРОВЕРЯЮ ОБНОВЛЕНИЕ…");
+  try{
+    const r = await fetch("index.html?u=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const text = await r.text();
+    const m = text.match(/const BUILD = "([^"]+)"/);
+    if(!m) throw new Error("НЕТ ВЕРСИИ В ФАЙЛЕ");
+    if(m[1] === BUILD){ if(manual) say("ВЕРСИЯ СВЕЖАЯ · " + BUILD); return; }
+    let tried = null;
+    try{ tried = sessionStorage.getItem("spend-updated-to"); }catch(e){}
+    if(tried === m[1]){ if(manual) say("ОБНОВЛЕНИЕ НЕ ПРИМЕНИЛОСЬ · " + m[1], true); return; }
+    try{ sessionStorage.setItem("spend-updated-to", m[1]); }catch(e){}
+    say("НОВАЯ ВЕРСИЯ · ЗАГРУЖАЮ…");
+    location.replace("index.html?v=" + encodeURIComponent(m[1]));
+  }catch(e){ if(manual) say("НЕ ПРОВЕРИЛОСЬ · " + e.message, true); }
+}
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible") checkUpdate(false); });
 
 // ------------------------------------------------------------------ gate
 function showGate(msg){
@@ -1278,6 +1308,8 @@ async function boot(){
     await load(); renderDraft(); render(); fitDock(); syncTab();
     say("СИНХРОНИЗИРОВАНО · " + tx.length + " ТРАТ · " + inbox.length + " НЕ ПОДШИТО"
       + (fxDate ? " · FX " + fxDate : ""));
+    $("buildLbl").textContent = BUILD;
+    setTimeout(() => checkUpdate(false), 1500);
   }catch(e){
     if(String(e.message) === "401") return;
     say("НЕ ЗАГРУЗИЛОСЬ · " + e.message, true);
