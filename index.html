@@ -402,7 +402,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
-const BUILD = "2026-11-26-0835";          // bumped on every deploy
+const BUILD = "2026-11-26-1120";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
@@ -1324,7 +1324,7 @@ $("expBtn").onclick = () => {
   d.showModal();
 };
 $("outBtn").onclick = () => { saveSession(null); location.reload(); };
-$("updBtn").onclick = () => checkUpdate(true);
+$("updBtn").onclick = () => { refresh(true); checkUpdate(true); };
 
 // ------------------------------------------------------------------ updates
 // GitHub serves this page with max-age=600, so a phone can hold an old copy
@@ -1350,8 +1350,59 @@ async function checkUpdate(manual){
     location.replace("index.html?v=" + encodeURIComponent(m[1]));
   }catch(e){ if(manual) say("НЕ ПРОВЕРИЛОСЬ · " + e.message, true); }
 }
+// ------------------------------------------------------------------ refresh
+// A card payment lands in the inbox while the app sits in the background, so
+// coming back to it must re-read the data, not just look for a new build.
+let lastLoad = Date.now(), reloading = false;
+function statusLine(){
+  say("v" + BUILD.slice(-4) + " \u00b7 " + tx.length + " \u0422\u0420\u0410\u0422 \u00b7 "
+    + inbox.length + " \u041d\u0415 \u041f\u041e\u0414\u0428\u0418\u0422\u041e"
+    + (fxDate ? " \u00b7 FX " + fxDate : ""));
+}
+async function refresh(manual){
+  if(reloading || saving || !P) return;
+  if(!manual){
+    if(Date.now() - lastLoad < 12000) return;
+    const a = document.activeElement;
+    if(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA")) return;
+    if(document.getElementById("dlg") && document.getElementById("dlg").open) return;
+  }
+  reloading = true;
+  const before = inbox.length;
+  // Hold on to the section in view, not to a pixel: a new inbox card above
+  // changes every offset below it, and a restored pixel would land elsewhere.
+  let anchor = null, delta = 0;
+  for(const id of SECTIONS){
+    const el = $(id); if(!el) continue;
+    if(el.offsetTop <= window.scrollY + 1){ anchor = el; delta = window.scrollY - el.offsetTop; }
+  }
+  if(manual) say("\u041e\u0411\u041d\u041e\u0412\u041b\u042f\u042e\u2026");
+  try{
+    await ensureFresh();
+    await load();
+    render();
+    lastLoad = Date.now();
+    fitHead(); fitDock();
+    if(anchor){
+      const want = Math.max(0, anchor.offsetTop + delta);
+      if(Math.abs(window.scrollY - want) > 2) window.scrollTo(0, want);
+    }
+    syncTab();
+    if(inbox.length > before)
+      say((inbox.length - before) + " \u041d\u041e\u0412\u0410\u042f \u041e\u041f\u041b\u0410\u0422\u0410 \u00b7 \u041f\u041e\u0414\u0428\u0415\u0419 \u0415\u0401 \u0412 TODAY");
+    else statusLine();
+  }catch(e){
+    if(String(e.message) !== "401")
+      say("\u041d\u0415 \u041e\u0411\u041d\u041e\u0412\u0418\u041b\u041e\u0421\u042c \u00b7 " + e.message, true);
+  }finally{ reloading = false; }
+}
 document.addEventListener("visibilitychange", () => {
-  if(document.visibilityState === "visible") checkUpdate(false); });
+  if(document.visibilityState !== "visible") return;
+  checkUpdate(false);
+  refresh(false);
+});
+window.addEventListener("focus", () => refresh(false));
+setInterval(() => { if(document.visibilityState === "visible") refresh(false); }, 45000);
 
 // ------------------------------------------------------------------ gate
 function showGate(msg){
@@ -1378,8 +1429,8 @@ async function boot(){
   $("app").style.display = "block";
   try{
     await load(); renderDraft(); render(); fitDock(); syncTab();
-    say("v" + BUILD.slice(-4) + " · " + tx.length + " ТРАТ · " + inbox.length
-      + " НЕ ПОДШИТО" + (fxDate ? " · FX " + fxDate : ""));
+    lastLoad = Date.now();
+    statusLine();
     $("buildLbl").textContent = BUILD;
     setTimeout(() => checkUpdate(false), 1500);
   }catch(e){
