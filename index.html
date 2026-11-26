@@ -392,7 +392,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
-const BUILD = "2026-11-26-0215";          // bumped on every deploy
+const BUILD = "2026-11-26-0245";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
@@ -1011,6 +1011,7 @@ async function addTx(rec, msg){
   // mark it after the last render, otherwise the re-render wipes the class
   const fresh = document.querySelector("#items .ln");
   if(fresh) fresh.classList.add("fresh");
+  unclip();
   return made[0];
 }
 
@@ -1138,8 +1139,8 @@ $("roll").addEventListener("click", e => {
   }
   if(hit("[data-unpin]")){ pinned = false; shownNum = null; return render(); }
   if((el = hit("[data-amt]"))){ $("amt").value = el.dataset.amt; updateHint();
-    return $("note").focus(); }
-  if((el = hit("[data-note]"))){ $("note").value = el.dataset.note; return $("amt").focus(); }
+    return focusSoft($("note")); }
+  if((el = hit("[data-note]"))){ $("note").value = el.dataset.note; return focusSoft($("amt")); }
   if(hit("[data-zero]")) return zeroDay();
   if((el = hit("[data-win]"))){ win = el.dataset.win; return render(); }
 });
@@ -1185,6 +1186,33 @@ $("loanToggle").onclick = function(){
   this.textContent = (withLoan ? "−" : "+") + " СЧИТАТЬ СО STUDENT LOAN";
   if(P) render();
 };
+
+// ---- the keyboard must not leave the roll half under the head
+// Focusing a field inside the pinned bar makes iOS scroll the whole document
+// to clear the keyboard; the top of the roll then sits behind the sticky head
+// and the big number looks sliced. So: focus without the browser scrolling,
+// and put the roll back once the field is done with.
+function focusSoft(el){
+  try{ el.focus({preventScroll:true}); }catch(e){ el.focus(); }
+}
+function heroHidden(){
+  const head = document.querySelector(".head"), hero = $("hero");
+  if(!head || !hero) return false;
+  return hero.getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+}
+function unclip(){
+  if(window.scrollY > 0 && window.scrollY < 500 && heroHidden())
+    window.scrollTo({top:0, behavior:"smooth"});
+}
+["dock","s-debts"].forEach(id => {              // focusout bubbles, blur does not
+  const el = $(id);
+  if(el) el.addEventListener("focusout", () => setTimeout(unclip, 200));
+});
+// the keyboard opening or closing resizes the visual viewport - the one signal
+// iOS always gives us
+if(window.visualViewport)
+  window.visualViewport.addEventListener("resize", () => setTimeout(unclip, 200));
+window.addEventListener("pageshow", () => setTimeout(unclip, 300));
 
 // ---- tabs: jump to a section, and always show where you are
 const SECTIONS = ["s-today","s-accounts","s-savings","s-debts","s-insights"];
