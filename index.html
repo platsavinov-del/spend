@@ -44,6 +44,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .tabs button.on{background:var(--paper);color:var(--ink);border-color:var(--paper)}
 
 /* ---- the paper ---- */
+.fade{position:fixed;left:0;right:0;z-index:8;height:18px;pointer-events:none;
+  max-width:440px;margin:0 auto;
+  background:linear-gradient(var(--paper),rgba(236,232,222,0))}
 .roll{background:var(--paper);color:var(--ink);min-height:70vh;
   padding-block:4px 170px;
   padding-left:max(14px,env(safe-area-inset-left,0px));
@@ -263,6 +266,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
     </nav>
   </header>
 
+  <div class="fade" id="fade"></div>
   <main class="roll" id="roll">
     <section id="s-today">
       <div class="lb" id="heroLbl">ALLOWANCE</div>
@@ -392,7 +396,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
-const BUILD = "2026-11-26-0245";          // bumped on every deploy
+const BUILD = "2026-11-26-0310";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
@@ -630,6 +634,8 @@ function fitHead(){
   if(!head) return;
   const h = head.offsetHeight + (parseFloat(getComputedStyle(head).top) || 0);
   document.documentElement.style.setProperty("--headH", Math.round(h + 12) + "px");
+  const fade = $("fade");
+  if(fade) fade.style.top = Math.round(h) + "px";
 }
 
 // ------------------------------------------------------------------ render
@@ -1200,10 +1206,30 @@ function heroHidden(){
   if(!head || !hero) return false;
   return hero.getBoundingClientRect().top < head.getBoundingClientRect().bottom;
 }
+// the head cutting across the middle of the big number - the state that reads
+// as broken. Fully scrolled past is fine; half-eaten is not.
+function heroSliced(){
+  const head = document.querySelector(".head"), hero = $("hero");
+  if(!head || !hero) return false;
+  const edge = head.getBoundingClientRect().bottom, r = hero.getBoundingClientRect();
+  return r.top < edge && r.bottom > edge - 2;
+}
 function unclip(){
   if(window.scrollY > 0 && window.scrollY < 500 && heroHidden())
     window.scrollTo({top:0, behavior:"smooth"});
 }
+// after any scroll settles, never leave the number half eaten: either it is
+// whole, or you have scrolled well past it
+let sliceT, navUntil = 0;
+window.addEventListener("scroll", () => {
+  clearTimeout(sliceT);
+  sliceT = setTimeout(() => {
+    // only right at the top, and never while a tab is still travelling
+    if(Date.now() < navUntil) return;
+    if(window.scrollY > 0 && window.scrollY < 200 && heroSliced())
+      window.scrollTo({top:0, behavior:"smooth"});
+  }, 350);
+}, {passive:true});
 ["dock","s-debts"].forEach(id => {              // focusout bubbles, blur does not
   const el = $(id);
   if(el) el.addEventListener("focusout", () => setTimeout(unclip, 200));
@@ -1225,6 +1251,7 @@ document.addEventListener("click", e => {
   const id = go.dataset.go, el = $(id);
   if(!el) return;
   setTab(id);
+  navUntil = Date.now() + 2500;
   el.scrollIntoView({behavior:"smooth", block:"start"});
 });
 function syncTab(){
@@ -1334,8 +1361,8 @@ async function boot(){
   $("app").style.display = "block";
   try{
     await load(); renderDraft(); render(); fitDock(); syncTab();
-    say("СИНХРОНИЗИРОВАНО · " + tx.length + " ТРАТ · " + inbox.length + " НЕ ПОДШИТО"
-      + (fxDate ? " · FX " + fxDate : ""));
+    say("v" + BUILD.slice(-4) + " · " + tx.length + " ТРАТ · " + inbox.length
+      + " НЕ ПОДШИТО" + (fxDate ? " · FX " + fxDate : ""));
     $("buildLbl").textContent = BUILD;
     setTimeout(() => checkUpdate(false), 1500);
   }catch(e){
