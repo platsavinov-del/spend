@@ -19,7 +19,7 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-html{scroll-snap-type:y proximity}
+html{scroll-snap-type:y proximity;padding-top:env(safe-area-inset-top,0px)}
 #s-today{scroll-snap-align:start}
 body{background:var(--ink);color:var(--paper);
   font-family:ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
@@ -402,7 +402,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
-const BUILD = "2026-11-26-0350";          // bumped on every deploy
+const BUILD = "2026-11-26-0835";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
