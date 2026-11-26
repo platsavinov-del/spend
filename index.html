@@ -19,6 +19,8 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0}
+html{scroll-snap-type:y proximity}
+#s-today{scroll-snap-align:start}
 body{background:var(--ink);color:var(--paper);
   font-family:ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
   font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
@@ -28,6 +30,7 @@ button,input{font-family:inherit}
 
 /* ---- print head ---- */
 .head{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:var(--ink);
+  transition:transform .22s cubic-bezier(.3,.8,.3,1);will-change:transform;
   padding-block:10px 9px;
   padding-left:max(14px,env(safe-area-inset-left,0px));
   padding-right:max(14px,env(safe-area-inset-right,0px))}
@@ -42,9 +45,12 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   padding:12px 4px;font-size:9.5px;letter-spacing:.04em;color:#8A8780;cursor:pointer;
   white-space:nowrap;min-height:40px;overflow:hidden;text-overflow:clip}
 .tabs button.on{background:var(--paper);color:var(--ink);border-color:var(--paper)}
+.head.away{transform:translateY(calc(-100% - env(safe-area-inset-top,0px)))}
+.fade.away{opacity:0}
 
 /* ---- the paper ---- */
 .fade{position:fixed;left:0;right:0;z-index:8;height:18px;pointer-events:none;
+  transition:opacity .2s;
   max-width:440px;margin:0 auto;
   background:linear-gradient(var(--paper),rgba(236,232,222,0))}
 .roll{background:var(--paper);color:var(--ink);min-height:70vh;
@@ -396,7 +402,7 @@ dialog textarea{width:100%;background:var(--paper-2);color:var(--ink);
 <dialog id="dlg"></dialog>
 
 <script>
-const BUILD = "2026-11-26-0310";          // bumped on every deploy
+const BUILD = "2026-11-26-0350";          // bumped on every deploy
 const SUPABASE_URL = "https://helajsuxtjzxfcbwjdqw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TD2HOG6IkwkuYaaLfs6dhg_LaZZCmek";
 const SKIM = 0.3;                       // share of an underspent day that is banked
@@ -1210,7 +1216,7 @@ function heroHidden(){
 // as broken. Fully scrolled past is fine; half-eaten is not.
 function heroSliced(){
   const head = document.querySelector(".head"), hero = $("hero");
-  if(!head || !hero) return false;
+  if(!head || !hero || head.classList.contains("away")) return false;
   const edge = head.getBoundingClientRect().bottom, r = hero.getBoundingClientRect();
   return r.top < edge && r.bottom > edge - 2;
 }
@@ -1218,17 +1224,27 @@ function unclip(){
   if(window.scrollY > 0 && window.scrollY < 500 && heroHidden())
     window.scrollTo({top:0, behavior:"smooth"});
 }
-// after any scroll settles, never leave the number half eaten: either it is
-// whole, or you have scrolled well past it
-let sliceT, navUntil = 0;
+// the head steps aside while you read and returns the moment you head back up
+let lastY = 0, navUntil = 0;
+function headScroll(){
+  const head = document.querySelector(".head"), fade = $("fade");
+  const y = window.scrollY;
+  const hide = v => { head.classList.toggle("away", v);
+    if(fade) fade.classList.toggle("away", v); };
+  if(y <= 6 || Date.now() < navUntil) hide(false);
+  else if(y > lastY + 8) hide(true);
+  else if(y < lastY - 8) hide(false);
+  lastY = y;
+}
+window.addEventListener("scroll", headScroll, {passive:true});
+let sliceT;
 window.addEventListener("scroll", () => {
   clearTimeout(sliceT);
   sliceT = setTimeout(() => {
-    // only right at the top, and never while a tab is still travelling
     if(Date.now() < navUntil) return;
-    if(window.scrollY > 0 && window.scrollY < 200 && heroSliced())
+    if(window.scrollY > 0 && window.scrollY < 220 && heroSliced())
       window.scrollTo({top:0, behavior:"smooth"});
-  }, 350);
+  }, 380);
 }, {passive:true});
 ["dock","s-debts"].forEach(id => {              // focusout bubbles, blur does not
   const el = $(id);
@@ -1256,7 +1272,8 @@ document.addEventListener("click", e => {
 });
 function syncTab(){
   if($("app").style.display === "none") return;
-  const mark = document.querySelector(".head").getBoundingClientRect().bottom + 40;
+  const mark = (parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue("--headH")) || 96) + 40;
   let cur = SECTIONS[0];
   SECTIONS.forEach(id => {
     const el = $(id); if(!el) return;
