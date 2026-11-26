@@ -48,7 +48,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   padding-block:4px 170px;
   padding-left:max(14px,env(safe-area-inset-left,0px));
   padding-right:max(14px,env(safe-area-inset-right,0px))}
-section{scroll-margin-top:96px}
+section{scroll-margin-top:var(--headH,96px)}
 .tear{display:flex;align-items:center;gap:10px;padding:18px 0 14px;color:#8A8578;
   font-size:9.5px;letter-spacing:.24em;cursor:pointer;background:none;border:0;width:100%;
   font-family:inherit}
@@ -619,6 +619,15 @@ function updateHint(){
 function fitDock(){
   const h = $("dock").offsetHeight;
   $("roll").style.paddingBottom = (h + 26) + "px";
+  fitHead();
+}
+// how far a section has to sit below the sticky head, measured, not assumed:
+// on a phone the head also carries the notch inset
+function fitHead(){
+  const head = document.querySelector(".head");
+  if(!head) return;
+  const h = head.offsetHeight + (parseFloat(getComputedStyle(head).top) || 0);
+  document.documentElement.style.setProperty("--headH", Math.round(h + 12) + "px");
 }
 
 // ------------------------------------------------------------------ render
@@ -1203,7 +1212,9 @@ function syncTab(){
 // measured straight from the scroll event: a frame callback can be throttled
 // when the page is in a hidden tab, which would freeze the tab marker
 window.addEventListener("scroll", syncTab, {passive:true});
-window.addEventListener("resize", () => { fitDock(); syncTab(); });
+window.addEventListener("resize", () => { fitDock(); fitHead(); syncTab(); });
+window.addEventListener("orientationchange", () => setTimeout(() => {
+  fitDock(); fitHead(); syncTab(); }, 250));
 
 // ------------------------------------------------------------------ dialogs
 $("setupBtn").onclick = () => {
